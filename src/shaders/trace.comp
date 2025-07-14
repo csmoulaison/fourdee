@@ -1,6 +1,6 @@
 #version 430 core
 
-layout (local_size_x = 32, local_size_y = 32) in;
+layout (local_size_x = 16, local_size_y = 16) in;
 
 layout(std430, binding = 0) buffer in_color_buffer
 {
@@ -75,7 +75,7 @@ Hit sphere_intersect(Ray ray, Sphere sphere)
 void main()
 {
 	ivec2 invocation = ivec2(gl_LocalInvocationID.xy);
-	int buffer_index = invocation.y * 32 + invocation.x;
+	int buffer_index = invocation.y * 16 + invocation.x;
 
 	vec2 screen = vec2(invocation.x - 0.5f + random_float() / 10.0f, invocation.y - 0.5f + random_float() / 10.0f);
 
@@ -98,8 +98,8 @@ void main()
 	}
 	else
 	{
-		color = 0.2f;
+		color = 0.1f;
 	}
-	color += random_float() * 0.1f;
+	color += random_float() * 0.2f;
 	color_buffer.colors[buffer_index] = color;
 }

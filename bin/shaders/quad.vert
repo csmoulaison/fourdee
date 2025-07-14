@@ -1,5 +1,5 @@
 #version 430 core
-layout (location = 0) in vec2 in_position;
+layout (location = 0) in vec3 in_position;
 
 layout(std430, binding = 0) buffer in_color_buffer
 {
@@ -8,13 +8,17 @@ layout(std430, binding = 0) buffer in_color_buffer
 
 out float f_color;
 
+layout(std140, binding = 1) uniform in_ubo
+{
+	mat4 projection;
+} ubo;
+
 void main()
 {
-	vec2 offset = vec2(mod(gl_InstanceID, 32), ((gl_InstanceID) / 32));
-	offset += vec2(-16, -16);
-	offset /= 20.0f;
-	offset += vec2(0.04, 0.04);
+	vec3 offset = vec3((gl_InstanceID / 16) % 16, (gl_InstanceID / 16) / 16, mod(gl_InstanceID, 16));
+	offset += vec3(-8.0f, -8.0f, -8.0f);
+	offset /= 16.0f;
 
-	gl_Position = vec4(in_position + offset, 0, 1.0f);
-	f_color = color_buffer.colors[gl_InstanceID];
+	gl_Position = ubo.projection * vec4((in_position / 48) + offset, 1.0f);
+	f_color = color_buffer.colors[gl_InstanceID / 16];
 }

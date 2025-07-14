@@ -9,9 +9,15 @@
 #include <string.h>
 #include <time.h>
 
+#include "cglm/cglm.h"
+
 typedef GLXContext(*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
 
+#include "vector.c"
+#include "primitives.c"
+#include "render_group.c"
 #include "input.c"
+#include "game.c"
 
 #define panic() printf("Panic at %s:%u\n", __FILE__, __LINE__); exit(1)
 
@@ -23,18 +29,17 @@ typedef struct
 	uint32_t trace_program;
 } GlContext;
 
-typedef struct 
+typedef struct
 {
-	float center[3];
-	float radius;
-} Sphere;
+	mat4 projection;
+} QuadUbo;
 
 typedef struct
 {
 	Sphere sphere;
-	float camera_position[3];
+	Vec3f camera_position;
 	float time;
-} RenderGroup;
+} TraceUbo;
 
 typedef struct 
 {
@@ -53,6 +58,8 @@ typedef struct
 
 	GlContext gl;
 	RenderGroup render_group;
+	QuadUbo quad_ubo;
+	TraceUbo trace_ubo;
 	Input input;
 } XlibContext;
 
@@ -94,6 +101,8 @@ uint32_t gl_compile_shader(char* filename, GLenum type)
 		printf(info);
 		panic();
 	}
+
+	printf("compiled %s\n", filename);
 
 	return shader;
 }
@@ -268,6 +277,10 @@ int32_t main(int32_t argc, char** argv)
 		panic();
 	}
 
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
 	// Shader quad_program
 	uint32_t vert_shader = gl_compile_shader("shaders/quad.vert", GL_VERTEX_SHADER);
 	uint32_t frag_shader = gl_compile_shader("shaders/quad.frag", GL_FRAGMENT_SHADER);
@@ -283,13 +296,47 @@ int32_t main(int32_t argc, char** argv)
 	// Vertex array/buffer
 	float vertices[] =
 	{
-		-0.02, 0.02,
-		0.02, -0.02,
-		-0.02, -0.02,
+		-1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f, -1.0f,
+		 1.0f,  1.0f, -1.0f,
+		 1.0f,  1.0f, -1.0f,
+		-1.0f,  1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f,
 
-		-0.02, 0.02,
-		0.02, -0.02,
-		0.02, 0.02
+		-1.0f, -1.0f,  1.0f,
+		 1.0f, -1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f,
+		-1.0f,  1.0f,  1.0f,
+		-1.0f, -1.0f,  1.0f,
+
+		-1.0f,  1.0f,  1.0f,
+		-1.0f,  1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f,
+		-1.0f, -1.0f,  1.0f,
+		-1.0f,  1.0f,  1.0f,
+
+		 1.0f,  1.0f,  1.0f,
+		 1.0f,  1.0f, -1.0f,
+		 1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f,
+
+		-1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f,  1.0f,
+		 1.0f, -1.0f,  1.0f,
+		-1.0f, -1.0f,  1.0f,
+		-1.0f, -1.0f, -1.0f,
+
+		-1.0f,  1.0f, -1.0f,
+		 1.0f,  1.0f, -1.0f,
+		 1.0f,  1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f,
+		-1.0f,  1.0f,  1.0f,
+		-1.0f,  1.0f, -1.0f,	
 	};
 
 	glGenVertexArrays(1, &xlib.gl.quad_vao);
@@ -301,7 +348,7 @@ int32_t main(int32_t argc, char** argv)
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 
 	float colors[1024];
 	for(uint32_t i = 0; i < 1024; i++)
@@ -315,12 +362,16 @@ int32_t main(int32_t argc, char** argv)
 	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(colors), colors, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, color_buffer);
 
-	// TODO - right now the RenderGroup struct is directly equivalent to the UBO layout, which will not
-	// always be the case.
-	uint32_t ubo_buffer;
-	glGenBuffers(1, &ubo_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, ubo_buffer);
+	uint32_t trace_ubo_buffer;
+	glGenBuffers(1, &trace_ubo_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, trace_ubo_buffer);
 	glBufferData(GL_UNIFORM_BUFFER, sizeof(xlib.render_group), &xlib.render_group, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	uint32_t quad_ubo_buffer;
+	glGenBuffers(1, &quad_ubo_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, quad_ubo_buffer);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(xlib.quad_ubo), &xlib.quad_ubo, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	// Compute shader
@@ -338,10 +389,8 @@ int32_t main(int32_t argc, char** argv)
 	xlib.window_height = window_attributes.height;
 	glViewport(0, 0, xlib.window_width, xlib.window_height);
 
-	// Initialize render_group to default
-	xlib.render_group.camera_position[0] = 0;
-	xlib.render_group.camera_position[1] = 0;
-	xlib.render_group.camera_position[2] = 0;
+	Game game;
+	game_init((void*)&game);
 
 	// Initialize input to default
 	xlib.input.mouse_delta_x = 0;
@@ -363,11 +412,12 @@ int32_t main(int32_t argc, char** argv)
 	bool should_quit = false;
 	while(should_quit == false)
 	{
+		xlib.input.mouse_delta_x = 0;
+		xlib.input.mouse_delta_y = 0;
 		while(XPending(xlib.display))
 		{
 			input_reset_buttons(&xlib.input);
 
-			// TODO - input handling and such
 			XEvent event;
 			XNextEvent(xlib.display,  &event);
 			switch(event.type)
@@ -384,7 +434,51 @@ int32_t main(int32_t argc, char** argv)
 					xlib.window_width = tmp_window_attributes.width;
 					xlib.window_height = tmp_window_attributes.height;
 					glViewport(0, 0, xlib.window_width, xlib.window_height);
-		           break;
+					break;
+				}
+				case MotionNotify:
+				{
+					if(xlib.mouse_just_warped) 
+					{
+						xlib.mouse_just_warped = 0;
+						break;
+					}
+
+					if(!xlib.mouse_moved_yet) 
+					{
+						xlib.mouse_moved_yet = 1;
+						xlib.input.mouse_delta_x = 0;
+						xlib.input.mouse_delta_y = 0;
+						xlib.input.mouse_x = event.xmotion.x;
+						xlib.input.mouse_y = event.xmotion.y;
+						break;
+					}
+
+					xlib.input.mouse_delta_x = event.xmotion.x - xlib.input.mouse_x;
+					xlib.input.mouse_delta_y = event.xmotion.y - xlib.input.mouse_y;
+					xlib.input.mouse_x = event.xmotion.x;
+					xlib.input.mouse_y = event.xmotion.y;
+
+					int32_t bounds_x = xlib.window_width / 4;
+					int32_t bounds_y = xlib.window_height / 4;
+					if(xlib.input.mouse_x < bounds_x ||
+						xlib.input.mouse_x > xlib.window_width - bounds_x ||
+						xlib.input.mouse_y < bounds_y ||
+						xlib.input.mouse_y > xlib.window_height - bounds_y)
+					{
+						xlib.mouse_just_warped = 1;
+						xlib.input.mouse_x = xlib.window_width / 2;
+						xlib.input.mouse_y = xlib.window_height / 2;
+
+						XWarpPointer(
+							xlib.display,
+							None,
+							event.xmotion.window,
+							0, 0, 0, 0,
+							xlib.window_width / 2, xlib.window_height / 2);
+						XSync(xlib.display, 0);
+					}
+					break;
 				}
 				case KeyPress:
 				{
@@ -458,59 +552,76 @@ int32_t main(int32_t argc, char** argv)
         xlib.time_previous = time_cur;
     	xlib.time_since_start += dt;
 
+    	xlib.render_group = game_loop((void*)&game, &xlib.input, dt);
+
+		// NOW - It should be relatively clear how to extend this to 4d pathtracing on a 3d cube group.
+		// Likely, the best incremental approach would be to get the 3d working with camera orbit and such,
+		// but just duplicate 3d pathtracing results across one axis, THEN do the 4d stuff.
+
 		// Then - have only a certain number of pixels update at a time based on the delta time passed in
 		// the frame, and reflect this in the color somehow via gl_InstanceID. The last updated pixel
 		// should be a bit brighter than the next, and so on.
 
-		// Then - It should be relatively clear how to extend this to 4d pathtracing on a 3d cube group.
-		// Likely, the best incremental approach would be to get the 3d working with camera orbit and such,
-		// but just duplicate 3d pathtracing results across one axis, THEN do the 4d stuff.
-
 		// Gl render
-		glClearColor(0, 0, 1, 1);
-		glClear(GL_COLOR_BUFFER_BIT);
+		glClearColor(0.1, 0.0, 0.2, 1);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		// Update UBO
-		float speed = 0.1;
-		float* camx = &xlib.render_group.camera_position[0];
-		float* camz = &xlib.render_group.camera_position[2];
+		// Update trace ubo
+		xlib.trace_ubo.time = xlib.time_since_start;
+		xlib.trace_ubo.camera_position = xlib.render_group.camera_position_4d;
 
-		if(xlib.input.move_forward.held) 
-			*camz -= speed;
-		if(xlib.input.move_left.held) 
-			*camx -= speed;
-		if(xlib.input.move_back.held)
-			*camz += speed;
-		if(xlib.input.move_right.held) 
-			*camx += speed;
-
-		xlib.render_group.time = xlib.time_since_start;
-		
-		glBindBuffer(GL_UNIFORM_BUFFER, ubo_buffer);
-		void* ubo_pointer = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-		memcpy(ubo_pointer, &xlib.render_group, sizeof(xlib.render_group));
+		glBindBuffer(GL_UNIFORM_BUFFER, trace_ubo_buffer);
+		void* p_trace_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+		memcpy(p_trace_ubo, &xlib.trace_ubo, sizeof(xlib.trace_ubo));
 		glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 		// Dispatch pathtracer
 		glUseProgram(xlib.gl.trace_program);
 
-		uint32_t ubo_block_index = glGetUniformBlockIndex(xlib.gl.trace_program, "ubo");
-		glBindBufferBase(GL_UNIFORM_BUFFER, 1, ubo_buffer);
-		glUniformBlockBinding(xlib.gl.trace_program, ubo_block_index, 1);
+		uint32_t trace_ubo_block_index = glGetUniformBlockIndex(xlib.gl.trace_program, "ubo");
+		glBindBufferBase(GL_UNIFORM_BUFFER, 1, trace_ubo_buffer);
+		glUniformBlockBinding(xlib.gl.trace_program, trace_ubo_block_index, 1);
 
-		glDispatchCompute(32, 32, 1);
+		glDispatchCompute(16, 16, 1);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+		// Update quad ubo
+		mat4 perspective;
+		glm_perspective(glm_rad(75.0f), (float)xlib.window_width / (float)xlib.window_height, 0.05f, 100.0f, perspective);
+
+		mat4 view;
+		glm_mat4_identity(view);
+		Vec3f cam_target = {0, 0, 0};
+		Vec3f up = {0, 1, 0};
+		glm_lookat((float*)&xlib.render_group.camera_position_3d, (float*)&cam_target, (float*)&up, view);
+
+		glm_mat4_mul(perspective, view, xlib.quad_ubo.projection);
+
+		glBindBuffer(GL_UNIFORM_BUFFER, quad_ubo_buffer);
+		void* p_quad_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+		memcpy(p_quad_ubo, &xlib.quad_ubo, sizeof(xlib.quad_ubo));
+		glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 		// Draw grid
 		glUseProgram(xlib.gl.quad_program);
+
+		uint32_t quad_ubo_block_index = glGetUniformBlockIndex(xlib.gl.quad_program, "ubo");
+		glBindBufferBase(GL_UNIFORM_BUFFER, 1, quad_ubo_buffer);
+		glUniformBlockBinding(xlib.gl.quad_program, quad_ubo_block_index, 1);
+
 		glBindVertexArray(xlib.gl.quad_vao);
-		glDrawArraysInstanced(GL_TRIANGLES, 0, 6, 1024);
+		glDrawArraysInstanced(GL_TRIANGLES, 0, 36, 4096);
 
 		glXSwapBuffers(xlib.display, xlib.window);
 
 		// Update debug HUD
+		/*
 		printf("\033[2J\033[H");
-		printf("x: %f\nz: %f\n", *camx, *camz);
+		printf("x: %f\nz: %f\n", 
+			xlib.render_group.camera_position_3d.x,
+			xlib.render_group.camera_position_3d.z
+		);
+		*/
 	}
 	
 	return 0;

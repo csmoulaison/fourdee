@@ -1,5 +1,5 @@
 // VOLATILE - this must match the number of buttons defined in input_state.
-#define INPUT_BUTTONS_LEN 5
+#define INPUT_BUTTONS_LEN 8
 
 typedef struct
 {
@@ -15,6 +15,9 @@ typedef struct
 	int32_t mouse_x;
 	int32_t mouse_y;
 
+	bool mouse_scroll_up;
+	bool mouse_scroll_down;
+
 	union 
 	{
     	InputButton buttons[INPUT_BUTTONS_LEN];
@@ -24,6 +27,9 @@ typedef struct
         	InputButton move_back;
         	InputButton move_left;
         	InputButton move_right;
+        	InputButton move_up;
+        	InputButton move_down;
+        	InputButton change_mode;
         	InputButton bang_center;
     	};
 	};
@@ -39,8 +45,8 @@ void input_reset_buttons(Input* input)
 
 void input_button_press(InputButton* btn) 
 {
-    btn->pressed = 1;
     btn->held = 1;
+    btn->pressed = 1;
 }
 
 void input_button_release(InputButton* btn) 

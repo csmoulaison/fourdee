@@ -6,19 +6,27 @@ layout(std430, binding = 0) buffer in_color_buffer
 	float colors[];
 } color_buffer;
 
-out float f_color;
+layout(std430, binding = 1) buffer in_instance_to_voxel_buffer
+{
+	int map[];
+} instance_to_voxel_buffer;
 
-layout(std140, binding = 1) uniform in_ubo
+layout(std140, binding = 0) uniform in_ubo
 {
 	mat4 projection;
+	int grid_length;
 } ubo;
+
+out float f_color;
 
 void main()
 {
-	vec3 offset = vec3((gl_InstanceID / 16) % 16, (gl_InstanceID / 16) / 16, mod(gl_InstanceID, 16));
-	offset += vec3(-8.0f, -8.0f, -8.0f);
+	int voxel_id = instance_to_voxel_buffer.map[gl_InstanceID];
+
+	vec3 offset = vec3(mod(voxel_id, ubo.grid_length), (voxel_id / ubo.grid_length) % ubo.grid_length, (voxel_id / ubo.grid_length) / ubo.grid_length);
+	offset += vec3(-(ubo.grid_length / 2.0f));
 	offset /= 16.0f;
 
 	gl_Position = ubo.projection * vec4((in_position / 48) + offset, 1.0f);
-	f_color = color_buffer.colors[gl_InstanceID / 16];
+	f_color = 0.05f + color_buffer.colors[voxel_id];
 }

@@ -11,35 +11,16 @@
 
 #include "cglm/cglm.h"
 
-typedef GLXContext(*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
-
-#include "vector.c"
-#include "primitives.c"
-#include "render_group.c"
-#include "input.c"
-#include "game.c"
-
 #define panic() printf("Panic at %s:%u\n", __FILE__, __LINE__); exit(1)
 
-typedef struct
-{
-	uint32_t quad_program;
-	uint32_t quad_vao;
+#include "lerp.c"
+#include "vector.c"
+#include "primitives.c"
+#include "input.c"
+#include "game.c"
+#include "opengl.c"
 
-	uint32_t trace_program;
-} GlContext;
-
-typedef struct
-{
-	mat4 projection;
-} QuadUbo;
-
-typedef struct
-{
-	Sphere sphere;
-	Vec3f camera_position;
-	float time;
-} TraceUbo;
+typedef GLXContext(*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
 
 typedef struct 
 {
@@ -50,62 +31,13 @@ typedef struct
 	uint32_t mouse_moved_yet;
 	uint32_t mouse_just_warped;
 
-	float time_since_start;
 	struct timespec time_previous;
 
-	void* game_memory;
-	uint32_t game_memory_bytes;
+	Game game;
 
-	GlContext gl;
-	RenderGroup render_group;
-	QuadUbo quad_ubo;
-	TraceUbo trace_ubo;
+	GlContext gl; // this will become a union if multiple APIs are introduced.
 	Input input;
 } XlibContext;
-
-uint32_t gl_compile_shader(char* filename, GLenum type)
-{
-	// Read file
-	FILE* file = fopen(filename, "r");
-	if(file == NULL) 
-	{
-		panic();
-	}
-	fseek(file, 0, SEEK_END);
-	uint32_t fsize = ftell(file);
-	fseek(file, 0, SEEK_SET);
-	char src[fsize];
-
-	char c;
-	uint32_t i = 0;
-	while((c = fgetc(file)) != EOF)
-	{
-		src[i] = c;
-		i++;
-	}
-	src[i] = '\0';
-	fclose(file);
-
-	// Compile shader
-	uint32_t shader = glCreateShader(type);
-	const char* src_ptr = src;
-	glShaderSource(shader, 1, &src_ptr, 0);
-	glCompileShader(shader);
-
-	int32_t success;
-	char info[512];
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-	if(success == false)
-	{
-		glGetShaderInfoLog(shader, 512, NULL, info);
-		printf(info);
-		panic();
-	}
-
-	printf("compiled %s\n", filename);
-
-	return shader;
-}
 
 int32_t main(int32_t argc, char** argv)
 {
@@ -184,7 +116,7 @@ int32_t main(int32_t argc, char** argv)
 		.colormap = XCreateColormap(xlib.display, root_window, visual_info->visual, AllocNone),
 		.background_pixmap = None,
 		.border_pixel = 0,
-		.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask | KeyReleaseMask | PointerMotionMask
+		.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask | KeyReleaseMask | PointerMotionMask | ButtonPressMask
 	};
 
 	// Here's where our xlib window is created. This will be snipped out if/when we are graphics API independent.
@@ -268,120 +200,7 @@ int32_t main(int32_t argc, char** argv)
 	XFixesHideCursor(xlib.display, xlib.window);
 	XSync(xlib.display, 1);
 
-	// Now we initialize gl3w. In contrast with the GLX code, which will be decoupled from xlib
-	// initialization in the case we support another graphics API, The following code will be decoupled
-	// also from the platform layer entirely. Put another way, the following code should be able to run
-	// in our Win32 platform layer, for instance.
-	if(gl3wInit() != 0) 
-	{
-		panic();
-	}
-
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	// Shader quad_program
-	uint32_t vert_shader = gl_compile_shader("shaders/quad.vert", GL_VERTEX_SHADER);
-	uint32_t frag_shader = gl_compile_shader("shaders/quad.frag", GL_FRAGMENT_SHADER);
-
-	xlib.gl.quad_program = glCreateProgram();
-	glAttachShader(xlib.gl.quad_program, vert_shader);
-	glAttachShader(xlib.gl.quad_program, frag_shader);
-	glLinkProgram(xlib.gl.quad_program);
-
-	glDeleteShader(vert_shader);
-	glDeleteShader(frag_shader);
-
-	// Vertex array/buffer
-	float vertices[] =
-	{
-		-1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f,  1.0f, -1.0f,
-		 1.0f,  1.0f, -1.0f,
-		-1.0f,  1.0f, -1.0f,
-		-1.0f, -1.0f, -1.0f,
-
-		-1.0f, -1.0f,  1.0f,
-		 1.0f, -1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		-1.0f,  1.0f,  1.0f,
-		-1.0f, -1.0f,  1.0f,
-
-		-1.0f,  1.0f,  1.0f,
-		-1.0f,  1.0f, -1.0f,
-		-1.0f, -1.0f, -1.0f,
-		-1.0f, -1.0f, -1.0f,
-		-1.0f, -1.0f,  1.0f,
-		-1.0f,  1.0f,  1.0f,
-
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-
-		-1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f,  1.0f,
-		 1.0f, -1.0f,  1.0f,
-		-1.0f, -1.0f,  1.0f,
-		-1.0f, -1.0f, -1.0f,
-
-		-1.0f,  1.0f, -1.0f,
-		 1.0f,  1.0f, -1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		-1.0f,  1.0f,  1.0f,
-		-1.0f,  1.0f, -1.0f,	
-	};
-
-	glGenVertexArrays(1, &xlib.gl.quad_vao);
-	glBindVertexArray(xlib.gl.quad_vao);
-
-	uint32_t vertex_buffer;
-	glGenBuffers(1, &vertex_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-
-	float colors[1024];
-	for(uint32_t i = 0; i < 1024; i++)
-	{
-		colors[i] = 0.5;
-	}
-
-	uint32_t color_buffer;
-	glGenBuffers(1, &color_buffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, color_buffer);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(colors), colors, GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, color_buffer);
-
-	uint32_t trace_ubo_buffer;
-	glGenBuffers(1, &trace_ubo_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, trace_ubo_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(xlib.render_group), &xlib.render_group, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-	uint32_t quad_ubo_buffer;
-	glGenBuffers(1, &quad_ubo_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, quad_ubo_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(xlib.quad_ubo), &xlib.quad_ubo, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-	// Compute shader
-	uint32_t compute_shader = gl_compile_shader("shaders/trace.comp", GL_COMPUTE_SHADER);
-
-	xlib.gl.trace_program = glCreateProgram();
-	glAttachShader(xlib.gl.trace_program, compute_shader);
-	glLinkProgram(xlib.gl.trace_program);
-
-	glDeleteShader(compute_shader);
+	gl_init(&xlib.gl);
 
 	XWindowAttributes window_attributes;
 	XGetWindowAttributes(xlib.display, xlib.window, &window_attributes);
@@ -389,8 +208,7 @@ int32_t main(int32_t argc, char** argv)
 	xlib.window_height = window_attributes.height;
 	glViewport(0, 0, xlib.window_width, xlib.window_height);
 
-	Game game;
-	game_init((void*)&game);
+	game_init(&xlib.game);
 
 	// Initialize input to default
 	xlib.input.mouse_delta_x = 0;
@@ -401,23 +219,26 @@ int32_t main(int32_t argc, char** argv)
 		xlib.input.buttons[i].pressed = 0;
 		xlib.input.buttons[i].released = 0;
 	}
+	xlib.mouse_moved_yet = false;
 
 	// Initialize time
     if(clock_gettime(CLOCK_REALTIME, &xlib.time_previous))
     {
         panic();
     }
-    xlib.time_since_start = 0;
 
 	bool should_quit = false;
 	while(should_quit == false)
 	{
-		xlib.input.mouse_delta_x = 0;
-		xlib.input.mouse_delta_y = 0;
+		Input* input = &xlib.input;
+		input->mouse_scroll_up = false;
+		input->mouse_scroll_down = false;
+		input->mouse_delta_x = 0;
+		input->mouse_delta_y = 0;
+		input_reset_buttons(input);
+
 		while(XPending(xlib.display))
 		{
-			input_reset_buttons(&xlib.input);
-
 			XEvent event;
 			XNextEvent(xlib.display,  &event);
 			switch(event.type)
@@ -447,28 +268,28 @@ int32_t main(int32_t argc, char** argv)
 					if(!xlib.mouse_moved_yet) 
 					{
 						xlib.mouse_moved_yet = 1;
-						xlib.input.mouse_delta_x = 0;
-						xlib.input.mouse_delta_y = 0;
-						xlib.input.mouse_x = event.xmotion.x;
-						xlib.input.mouse_y = event.xmotion.y;
+						input->mouse_delta_x = 0;
+						input->mouse_delta_y = 0;
+						input->mouse_x = event.xmotion.x;
+						input->mouse_y = event.xmotion.y;
 						break;
 					}
 
-					xlib.input.mouse_delta_x = event.xmotion.x - xlib.input.mouse_x;
-					xlib.input.mouse_delta_y = event.xmotion.y - xlib.input.mouse_y;
-					xlib.input.mouse_x = event.xmotion.x;
-					xlib.input.mouse_y = event.xmotion.y;
+					input->mouse_delta_x = event.xmotion.x - input->mouse_x;
+					input->mouse_delta_y = event.xmotion.y - input->mouse_y;
+					input->mouse_x = event.xmotion.x;
+					input->mouse_y = event.xmotion.y;
 
 					int32_t bounds_x = xlib.window_width / 4;
 					int32_t bounds_y = xlib.window_height / 4;
-					if(xlib.input.mouse_x < bounds_x ||
-						xlib.input.mouse_x > xlib.window_width - bounds_x ||
-						xlib.input.mouse_y < bounds_y ||
-						xlib.input.mouse_y > xlib.window_height - bounds_y)
+					if(input->mouse_x < bounds_x ||
+						input->mouse_x > xlib.window_width - bounds_x ||
+						input->mouse_y < bounds_y ||
+						input->mouse_y > xlib.window_height - bounds_y)
 					{
 						xlib.mouse_just_warped = 1;
-						xlib.input.mouse_x = xlib.window_width / 2;
-						xlib.input.mouse_y = xlib.window_height / 2;
+						input->mouse_x = xlib.window_width / 2;
+						input->mouse_y = xlib.window_height / 2;
 
 						XWarpPointer(
 							xlib.display,
@@ -480,6 +301,24 @@ int32_t main(int32_t argc, char** argv)
 					}
 					break;
 				}
+				case ButtonPress:
+				{
+					switch(event.xbutton.button)
+					{
+						case 4:
+						{
+							input->mouse_scroll_up = true;
+							break;
+						}
+						case 5:
+						{
+							input->mouse_scroll_down = true;
+							break;
+						}
+						default: break;
+					}
+					break;
+				}
 				case KeyPress:
 				{
 					uint32_t keysym = XLookupKeysym(&(event.xkey), 0);
@@ -487,22 +326,37 @@ int32_t main(int32_t argc, char** argv)
 					{
 						case XK_w:
 						{
-							input_button_press(&xlib.input.move_forward);
+							input_button_press(&input->move_forward);
 							break;
 						}
 						case XK_a:
 						{
-							input_button_press(&xlib.input.move_left);
+							input_button_press(&input->move_left);
 							break;
 						}
 						case XK_s:
 						{
-							input_button_press(&xlib.input.move_back);
+							input_button_press(&input->move_back);
 							break;
 						}
 						case XK_d:
 						{
-							input_button_press(&xlib.input.move_right);
+							input_button_press(&input->move_right);
+							break;
+						}
+						case XK_q:
+						{
+							input_button_press(&input->move_down);
+							break;
+						}
+						case XK_e:
+						{
+							input_button_press(&input->move_up);
+							break;
+						}
+						case XK_Tab:
+						{
+							input_button_press(&input->change_mode);
 							break;
 						}
 						default: break;
@@ -516,22 +370,37 @@ int32_t main(int32_t argc, char** argv)
 					{
 						case XK_w:
 						{
-							input_button_release(&xlib.input.move_forward);
+							input_button_release(&input->move_forward);
 							break;
 						}
 						case XK_a:
 						{
-							input_button_release(&xlib.input.move_left);
+							input_button_release(&input->move_left);
 							break;
 						}
 						case XK_s:
 						{
-							input_button_release(&xlib.input.move_back);
+							input_button_release(&input->move_back);
 							break;
 						}
 						case XK_d:
 						{
-							input_button_release(&xlib.input.move_right);
+							input_button_release(&input->move_right);
+							break;
+						}
+						case XK_q:
+						{
+							input_button_release(&input->move_down);
+							break;
+						}
+						case XK_e:
+						{
+							input_button_release(&input->move_up);
+							break;
+						}
+						case XK_Tab:
+						{
+							input_button_release(&input->change_mode);
 							break;
 						}
 						default: break;
@@ -542,6 +411,19 @@ int32_t main(int32_t argc, char** argv)
 			}
 		}
 
+		// TODO - fix the actual issue. Right now, mouse_x has a tendency to go crazy
+		// when the mouse enters the window, so we are just filtering for that for now.
+		if(input->mouse_delta_x > 100)
+		{
+			printf("wtf mousex!\n");
+			input->mouse_delta_x = 0;
+		}
+		if(input->mouse_delta_y > 100)
+		{
+			printf("wtf mousey!\n");
+			input->mouse_delta_y = 0;
+		}
+
 		// Update time value
         struct timespec time_cur;
         if(clock_gettime(CLOCK_REALTIME, &time_cur))
@@ -550,78 +432,25 @@ int32_t main(int32_t argc, char** argv)
         }
     	float dt = time_cur.tv_sec - xlib.time_previous.tv_sec + (float)time_cur.tv_nsec / 1000000000 - (float)xlib.time_previous.tv_nsec / 1000000000;
         xlib.time_previous = time_cur;
-    	xlib.time_since_start += dt;
 
-    	xlib.render_group = game_loop((void*)&game, &xlib.input, dt);
+    	game_loop(&xlib.game, &xlib.input, dt);
 
-		// NOW - It should be relatively clear how to extend this to 4d pathtracing on a 3d cube group.
-		// Likely, the best incremental approach would be to get the 3d working with camera orbit and such,
-		// but just duplicate 3d pathtracing results across one axis, THEN do the 4d stuff.
-
-		// Then - have only a certain number of pixels update at a time based on the delta time passed in
-		// the frame, and reflect this in the color somehow via gl_InstanceID. The last updated pixel
-		// should be a bit brighter than the next, and so on.
-
-		// Gl render
-		glClearColor(0.1, 0.0, 0.2, 1);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-		// Update trace ubo
-		xlib.trace_ubo.time = xlib.time_since_start;
-		xlib.trace_ubo.camera_position = xlib.render_group.camera_position_4d;
-
-		glBindBuffer(GL_UNIFORM_BUFFER, trace_ubo_buffer);
-		void* p_trace_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-		memcpy(p_trace_ubo, &xlib.trace_ubo, sizeof(xlib.trace_ubo));
-		glUnmapBuffer(GL_UNIFORM_BUFFER);
-
-		// Dispatch pathtracer
-		glUseProgram(xlib.gl.trace_program);
-
-		uint32_t trace_ubo_block_index = glGetUniformBlockIndex(xlib.gl.trace_program, "ubo");
-		glBindBufferBase(GL_UNIFORM_BUFFER, 1, trace_ubo_buffer);
-		glUniformBlockBinding(xlib.gl.trace_program, trace_ubo_block_index, 1);
-
-		glDispatchCompute(16, 16, 1);
-		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-		// Update quad ubo
-		mat4 perspective;
-		glm_perspective(glm_rad(75.0f), (float)xlib.window_width / (float)xlib.window_height, 0.05f, 100.0f, perspective);
-
-		mat4 view;
-		glm_mat4_identity(view);
-		Vec3f cam_target = {0, 0, 0};
-		Vec3f up = {0, 1, 0};
-		glm_lookat((float*)&xlib.render_group.camera_position_3d, (float*)&cam_target, (float*)&up, view);
-
-		glm_mat4_mul(perspective, view, xlib.quad_ubo.projection);
-
-		glBindBuffer(GL_UNIFORM_BUFFER, quad_ubo_buffer);
-		void* p_quad_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-		memcpy(p_quad_ubo, &xlib.quad_ubo, sizeof(xlib.quad_ubo));
-		glUnmapBuffer(GL_UNIFORM_BUFFER);
-
-		// Draw grid
-		glUseProgram(xlib.gl.quad_program);
-
-		uint32_t quad_ubo_block_index = glGetUniformBlockIndex(xlib.gl.quad_program, "ubo");
-		glBindBufferBase(GL_UNIFORM_BUFFER, 1, quad_ubo_buffer);
-		glUniformBlockBinding(xlib.gl.quad_program, quad_ubo_block_index, 1);
-
-		glBindVertexArray(xlib.gl.quad_vao);
-		glDrawArraysInstanced(GL_TRIANGLES, 0, 36, 4096);
-
+    	gl_loop(&xlib.gl, &xlib.game, (float)xlib.window_width, (float)xlib.window_height);
+    	// TODO - deal with GlX stuff once we get another API. Too speculative as is.
 		glXSwapBuffers(xlib.display, xlib.window);
 
 		// Update debug HUD
-		/*
-		printf("\033[2J\033[H");
-		printf("x: %f\nz: %f\n", 
-			xlib.render_group.camera_position_3d.x,
-			xlib.render_group.camera_position_3d.z
-		);
-		*/
+		if(true)
+		{
+			printf("\033[2J\033[H");
+			printf("x: %f\ny: %f\nz: %f\nphi: %f\ntheta: %f\n", 
+				xlib.game.position.x,
+				xlib.game.position.y,
+				xlib.game.position.z,
+				xlib.game.phi,
+				xlib.game.theta
+			);
+		}
 	}
 	
 	return 0;

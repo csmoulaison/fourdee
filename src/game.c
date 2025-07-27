@@ -98,7 +98,7 @@ void game_loop(Game* game, Input* input, float dt)
 		}
 		case MODE_HOLOGRAPH:
 		{
-			min_dist = 0.8f;
+			min_dist = 0.4f;
 			break;
 		}
 		default: break;
@@ -160,5 +160,4 @@ void game_loop(Game* game, Input* input, float dt)
 		}
 		mode_init(game);
 	}
-
 }

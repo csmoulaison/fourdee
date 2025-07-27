@@ -14,37 +14,14 @@
 //
 // Finally, commonalities between the APIs are handled by shared procedures
 // called by each specific API.
- 
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_BMP
-#include "stb/stb_image.h"
-
-#include "voxel_sort.c"
 
 #define GRID_MAX_VOLUME 4096
-#define TEXT_MAX_CHARS 2048
-
-typedef struct
-{
-	int32_t index;
-	float x;
-	float y;
-} TextChar;
-
-#include "fill_text.c"
 
 typedef struct
 {
 	mat4 projection;
 	int32_t grid_length;
-} VoxelUbo;
-
-typedef struct
-{
-	// this is a mat2, but must be separated like this for padding requirements.
-	alignas(16) Vec2f transform_a;
-	alignas(16) Vec2f transform_b;
-} TextUbo;
+} QuadUbo;
 
 typedef struct
 {
@@ -76,29 +53,15 @@ typedef struct
 
 typedef struct
 {
-	// Textures
-	uint32_t font_texture;
-	
-	// UBOs
-	uint32_t voxel_ubo_buffer;
-	uint32_t text_ubo_buffer;
-	uint32_t special_ubo_buffer;
+	uint32_t quad_program;
+	uint32_t quad_vao;
 
-	// SSBOs
-	uint32_t text_buffer;
-	uint32_t instance_to_voxel_buffer;
-
-	// VAOs
-	uint32_t voxel_vao;
-	uint32_t text_vao;
-
-	// Raster programs
-	uint32_t voxel_program;
-	uint32_t text_program;
-
-	// Compute programs
 	uint32_t pathtrace_program;
 	uint32_t holograph_program;
+
+	uint32_t quad_ubo_buffer;
+	uint32_t special_ubo_buffer;
+	uint32_t instance_to_voxel_buffer;
 } GlContext;
 
 uint32_t gl_compile_shader(char* filename, GLenum type)
@@ -157,29 +120,18 @@ void gl_init(GlContext* gl)
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	// Voxel program
+	// Quad program
 	// TODO - factor out program creation
-	uint32_t voxel_vert_shader = gl_compile_shader("shaders/voxel.vert", GL_VERTEX_SHADER);
-	uint32_t voxel_frag_shader = gl_compile_shader("shaders/voxel.frag", GL_FRAGMENT_SHADER);
+	uint32_t vert_shader = gl_compile_shader("shaders/quad.vert", GL_VERTEX_SHADER);
+	uint32_t frag_shader = gl_compile_shader("shaders/quad.frag", GL_FRAGMENT_SHADER);
 
-	gl->voxel_program = glCreateProgram();
-	glAttachShader(gl->voxel_program, voxel_vert_shader);
-	glAttachShader(gl->voxel_program, voxel_frag_shader);
-	glLinkProgram(gl->voxel_program);
+	gl->quad_program = glCreateProgram();
+	glAttachShader(gl->quad_program, vert_shader);
+	glAttachShader(gl->quad_program, frag_shader);
+	glLinkProgram(gl->quad_program);
 
-	glDeleteShader(voxel_vert_shader);
-	glDeleteShader(voxel_frag_shader);
-
-	uint32_t text_vert_shader = gl_compile_shader("shaders/text.vert", GL_VERTEX_SHADER);
-	uint32_t text_frag_shader = gl_compile_shader("shaders/text.frag", GL_FRAGMENT_SHADER);
-
-	gl->text_program = glCreateProgram();
-	glAttachShader(gl->text_program, text_vert_shader);
-	glAttachShader(gl->text_program, text_frag_shader);
-	glLinkProgram(gl->text_program);
-
-	glDeleteShader(text_vert_shader);
-	glDeleteShader(text_frag_shader);
+	glDeleteShader(vert_shader);
+	glDeleteShader(frag_shader);
 
 	// Pathtrace program
 	// TODO - further factor out compute program creation
@@ -189,15 +141,15 @@ void gl_init(GlContext* gl)
 	glLinkProgram(gl->pathtrace_program);
 	glDeleteShader(pathtrace_shader);
 
-	// Holograph program
+	// Pathtrace program
 	uint32_t holograph_shader = gl_compile_shader("shaders/holograph.comp", GL_COMPUTE_SHADER);
 	gl->holograph_program = glCreateProgram();
 	glAttachShader(gl->holograph_program, holograph_shader);
 	glLinkProgram(gl->holograph_program);
 	glDeleteShader(holograph_shader);
 
-	// Vertex arrays/buffers
-	float voxel_vertices[] =
+	// Vertex array/buffer
+	float vertices[] =
 	{
 		-1.0f, -1.0f, -1.0f,
 		 1.0f, -1.0f, -1.0f,
@@ -242,72 +194,30 @@ void gl_init(GlContext* gl)
 		-1.0f,  1.0f, -1.0f,	
 	};
 
-	// TODO - factor out vbo/vao creation
-	glGenVertexArrays(1, &gl->voxel_vao);
-	glBindVertexArray(gl->voxel_vao);
+	glGenVertexArrays(1, &gl->quad_vao);
+	glBindVertexArray(gl->quad_vao);
 
-	uint32_t voxel_vertex_buffer;
-	glGenBuffers(1, &voxel_vertex_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, voxel_vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(voxel_vertices), voxel_vertices, GL_STATIC_DRAW);
+	uint32_t vertex_buffer;
+	glGenBuffers(1, &vertex_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
 
-	float text_quad_vertices[] =
+	float colors[GRID_MAX_VOLUME];
+	for(uint32_t i = 0; i < GRID_MAX_VOLUME ; i++)
 	{
-		 1.0f,  1.0f,
-		 1.0f, -1.0f,
-		-1.0f,  1.0f,
-
-		 1.0f, -1.0f,
-		-1.0f, -1.0f,
-		-1.0f,  1.0f
-	};
-
-	glGenVertexArrays(1, &gl->text_vao);
-	glBindVertexArray(gl->text_vao);
-
-	uint32_t text_vertex_buffer;
-	glGenBuffers(1, &text_vertex_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, text_vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(text_quad_vertices), text_quad_vertices, GL_STATIC_DRAW);
-
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-
-	// Font atlas texture
-	glGenTextures(1, &gl->font_texture);
-	glBindTexture(GL_TEXTURE_2D, gl->font_texture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	int32_t w, h, channels;
-	unsigned char* tex_data = stbi_load("fonts/plex_mono.bmp", &w, &h, &channels, 3);
-	if(tex_data == NULL)
-	{
-		panic();
+		colors[i] = 0.5;
 	}
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, tex_data);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	stbi_image_free(tex_data);
 
 	// SSBOs
 	// TODO - factor out ssbo creation
-	float colors[GRID_MAX_VOLUME];
-
 	uint32_t color_ssbo;
 	glGenBuffers(1, &color_ssbo);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, color_ssbo);
 	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(colors), NULL, GL_DYNAMIC_DRAW);
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, color_ssbo);
-
-	glGenBuffers(1, &gl->text_buffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->text_buffer);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(TextChar[TEXT_MAX_CHARS]), NULL, GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, gl->text_buffer);
 
 	glGenBuffers(1, &gl->instance_to_voxel_buffer);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->instance_to_voxel_buffer);
@@ -316,19 +226,14 @@ void gl_init(GlContext* gl)
 
 	// UBOs
 	// TODO - factor out ubo creation
-	glGenBuffers(1, &gl->voxel_ubo_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, gl->voxel_ubo_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(VoxelUbo), NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
-	glGenBuffers(1, &gl->text_ubo_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, gl->text_ubo_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(TextUbo), NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-
 	glGenBuffers(1, &gl->special_ubo_buffer);
 	glBindBuffer(GL_UNIFORM_BUFFER, gl->special_ubo_buffer);
 	glBufferData(GL_UNIFORM_BUFFER, sizeof(SpecialUbo), NULL, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	glGenBuffers(1, &gl->quad_ubo_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, gl->quad_ubo_buffer);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(QuadUbo), NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -400,9 +305,9 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	glDispatchCompute(grid_length, grid_length, dispatch_z);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-	// Update voxel ubo
-	VoxelUbo voxel_ubo;
-	voxel_ubo.grid_length = grid_length;
+	// Update quad ubo
+	QuadUbo quad_ubo;
+	quad_ubo.grid_length = grid_length;
 
 	mat4 perspective;
 	glm_perspective(glm_rad(75.0f), window_width / window_height, 0.05f, 100.0f, perspective);
@@ -413,93 +318,147 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	Vec3f up = {0, 1, 0};
 	glm_lookat((float*)&game->position, (float*)&cam_target, (float*)&up, view);
 
-	glm_mat4_mul(perspective, view, voxel_ubo.projection);
-
-	glBindBuffer(GL_UNIFORM_BUFFER, gl->voxel_ubo_buffer);
-	void* p_voxel_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	memcpy(p_voxel_ubo, &voxel_ubo, sizeof(voxel_ubo));
-	glUnmapBuffer(GL_UNIFORM_BUFFER);
+	glm_mat4_mul(perspective, view, quad_ubo.projection);
 
 	// Update instance to voxel map ssbo
 	int32_t instance_to_voxel_map[grid_volume];
 	Vec3f cam_pos = game->position;
 
-	sort_voxels(instance_to_voxel_map, grid_length, grid_area, grid_volume, cam_pos);
+	// All these variables suffexed "_term" will be 0 or 1, and are used to
+	// selectively terms we don't want in the final calculation.
+	int32_t x_positive_term = 0;
+	int32_t x_negative_term = 0;
+	int32_t x_unit_term = 0;
+	int32_t x_row_term = 0;
+	int32_t x_slice_term = 0;
+
+	int32_t y_positive_term = 0;
+	int32_t y_negative_term = 0;
+	int32_t y_unit_term = 0;
+	int32_t y_row_term = 0;
+	int32_t y_slice_term = 0;
+
+	int32_t z_positive_term = 0;
+	int32_t z_negative_term = 0;
+	int32_t z_unit_term = 0;
+	int32_t z_row_term = 0;
+	int32_t z_slice_term = 0;
+
+	float x_abs = abs(cam_pos.x);
+	float y_abs = abs(cam_pos.y);
+	float z_abs = abs(cam_pos.z);
+
+	if(z_abs > y_abs)
+	{
+		if(z_abs > x_abs)
+		{
+			z_slice_term = 1;
+			if(x_abs > y_abs)
+			{
+				x_row_term = 1;
+				y_unit_term = 1;
+			}
+			else
+			{
+				y_row_term = 1;
+				x_unit_term = 1;
+			}
+		}
+		else
+		{
+			x_slice_term = 1;
+			z_row_term = 1;
+			y_unit_term = 1;
+		}
+	}
+	else // y_abs > z_abs
+	{
+		if(y_abs > x_abs)
+		{
+			y_slice_term = 1;
+			if(z_abs > x_abs)
+			{
+				z_row_term = 1;
+				x_unit_term = 1;
+			}
+			else
+			{
+				x_row_term = 1;
+				z_unit_term = 1;
+			}
+		}
+		else
+		{
+			x_slice_term = 1;
+			y_row_term = 1;
+			z_unit_term = 1;
+		}
+	}
+
+	if(cam_pos.x >= 0)
+	{
+		x_positive_term = 1;
+	}
+	else
+	{
+		x_negative_term = 1;
+	}
+
+	if(cam_pos.y >= 0)
+	{
+		y_positive_term = 1;
+	}
+	else
+	{
+		y_negative_term = 1;
+	}
+
+	if(cam_pos.z >= 0)
+	{
+		z_positive_term = 1;
+	}
+	else
+	{
+		z_negative_term = 1;
+	}
+
+	for(int32_t i = 0; i < grid_volume; i++)
+	{
+		int32_t unit_index = i % grid_length;
+		int32_t row_index = (i % grid_area) / grid_length;
+		int32_t slice_index = i / grid_area;
+
+		int32_t x =
+			  (unit_index  * x_positive_term + (grid_length - 1 - unit_index)  * x_negative_term) * x_unit_term
+			+ (row_index   * x_positive_term + (grid_length - 1 - row_index)   * x_negative_term) * x_row_term
+			+ (slice_index * x_positive_term + (grid_length - 1 - slice_index) * x_negative_term) * x_slice_term;
+		int32_t y =
+			  (unit_index  * y_positive_term + (grid_length - 1 - unit_index)  * y_negative_term) * y_unit_term
+			+ (row_index   * y_positive_term + (grid_length - 1 - row_index)   * y_negative_term) * y_row_term
+			+ (slice_index * y_positive_term + (grid_length - 1 - slice_index) * y_negative_term) * y_slice_term;
+		int32_t z =
+			  (unit_index  * z_positive_term + (grid_length - 1 - unit_index)  * z_negative_term) * z_unit_term
+			+ (row_index   * z_positive_term + (grid_length - 1 - row_index)   * z_negative_term) * z_row_term
+			+ (slice_index * z_positive_term + (grid_length - 1 - slice_index) * z_negative_term) * z_slice_term;
+
+		instance_to_voxel_map[i] = z * grid_area + y * grid_length + x;
+	}
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->instance_to_voxel_buffer);
 	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(instance_to_voxel_map), instance_to_voxel_map);
 
-	// Draw grid
-	glUseProgram(gl->voxel_program);
-
-	uint32_t voxel_ubo_block_index = glGetUniformBlockIndex(gl->voxel_program, "ubo");
-	glBindBufferBase(GL_UNIFORM_BUFFER, 0, gl->voxel_ubo_buffer);
-	glUniformBlockBinding(gl->voxel_program, voxel_ubo_block_index, 0);
-
-	glBindVertexArray(gl->voxel_vao);
-	glDrawArraysInstanced(GL_TRIANGLES, 0, 36, grid_volume);
-
-	// Update text ubo
-	TextUbo text_ubo;	
-	float text_scale_x = 27.0f / window_width;
-	float text_scale_y = 46.0f / window_height;
-	
-	text_ubo.transform_a = (Vec2f) {  text_scale_x,  0 };
-	text_ubo.transform_b = (Vec2f) {  0, -text_scale_y };
-
-	glBindBuffer(GL_UNIFORM_BUFFER, gl->text_ubo_buffer);
-	void* p_text_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	memcpy(p_text_ubo, &text_ubo, sizeof(text_ubo));
+	glBindBuffer(GL_UNIFORM_BUFFER, gl->quad_ubo_buffer);
+	void* p_quad_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	memcpy(p_quad_ubo, &quad_ubo, sizeof(quad_ubo));
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
-	// Update text ssbo buffer
-	TextChar text_buffer[TEXT_MAX_CHARS];
-	//text_buffer[0] = (TextChar) {59, (Vec2f){ 0, 0 }};
-	//text_buffer[1] = (TextChar) {55, (Vec2f){ 0, 0 }};
-	//text_buffer[2] = (TextChar) {61, (Vec2f){ 0, 0 }};
+	// Draw grid
+	glUseProgram(gl->quad_program);
 
-	//text_buffer[3] = (TextChar) {0, (Vec2f){ 0, 0 }};
-	//text_buffer[4] = (TextChar) {45, (Vec2f){ 0, 0 }};
-	//text_buffer[5] = (TextChar) {79, (Vec2f){ 0, 0 }};
-	//text_buffer[6] = (TextChar) {86, (Vec2f){ 0, 0 }};
-	//text_buffer[7] = (TextChar) {69, (Vec2f){ 0, 0 }};
-	//text_buffer[8] = (TextChar) {0, (Vec2f){ 0, 0 }};
+	uint32_t quad_ubo_block_index = glGetUniformBlockIndex(gl->quad_program, "ubo");
+	glBindBufferBase(GL_UNIFORM_BUFFER, 0, gl->quad_ubo_buffer);
+	glUniformBlockBinding(gl->quad_program, quad_ubo_block_index, 0);
 
-	// NOW - 1. Improve text rendering API, moving some of it to game code.
-	//       2. Reason about where different calculations should be made between
-	//          GPU and host. Probably a lot more here, obviously.
-	//       3. Keep in mind any additional features such as text color and things.
-	//           
-	// Then, we should probably move on to formalizing the way we are keeping track
-	// of level-specific things, and how they will end up in an asset.
-	//
-	// As a part of that, we will want to make the flow between levels and
-	// implement the level selector.
-
-	char* s = "[W,S]   Move Z";
-	uint32_t text_i = fill_text_buffer(s, text_buffer, (Vec2f){0, 0});
-
-	char* s2 = "[A,D]   Move X";
-	text_i += fill_text_buffer(s2, &text_buffer[text_i], (Vec2f){0, 1.5});
-
-	char* s3 = "[Q,E]   Move Y";
-	text_i += fill_text_buffer(s3, &text_buffer[text_i], (Vec2f){0, 3.0});
-
-	char* s4 = "[Mouse] Orbit";
-	text_i += fill_text_buffer(s4, &text_buffer[text_i], (Vec2f){0, 4.5});
-
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->text_buffer);
-	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(text_buffer), text_buffer);
-
-	// Draw text
-	glUseProgram(gl->text_program);
-
-	uint32_t text_ubo_block_index = glGetUniformBlockIndex(gl->text_program, "ubo");
-	glBindBufferBase(GL_UNIFORM_BUFFER, 0, gl->text_ubo_buffer);
-	glUniformBlockBinding(gl->text_program, text_ubo_block_index, 0);
-
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, gl->font_texture);
-	glBindVertexArray(gl->text_vao);
-	glDrawArraysInstanced(GL_TRIANGLES, 0, 6, text_i);
+	glBindVertexArray(gl->quad_vao);
+	glDrawArraysInstanced(GL_TRIANGLES, 0, 36, grid_volume);
 }

@@ -1,4 +1,5 @@
 cp ../src/shaders/ ../bin/ -r
+cp fonts/ ../bin/ -r
 
 gcc ../src/xlib_main.c ../external/GL/gl3w.c \
 	-o ../bin/fourdee \

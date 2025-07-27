@@ -440,7 +440,7 @@ int32_t main(int32_t argc, char** argv)
 		glXSwapBuffers(xlib.display, xlib.window);
 
 		// Update debug HUD
-		if(true)
+		if(1==1) // DBG hud
 		{
 			printf("\033[2J\033[H");
 			printf("x: %f\ny: %f\nz: %f\nphi: %f\ntheta: %f\n", 

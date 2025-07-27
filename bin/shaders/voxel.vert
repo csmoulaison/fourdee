@@ -24,9 +24,9 @@ void main()
 	int voxel_id = instance_to_voxel_buffer.map[gl_InstanceID];
 
 	vec3 offset = vec3(mod(voxel_id, ubo.grid_length), (voxel_id / ubo.grid_length) % ubo.grid_length, (voxel_id / ubo.grid_length) / ubo.grid_length);
-	offset += vec3(-(ubo.grid_length / 2.0f));
+	offset += vec3(-(ubo.grid_length / 2.0f) + 0.5f);
 	offset /= 16.0f;
 
-	gl_Position = ubo.projection * vec4((in_position / 48) + offset, 1.0f);
-	f_color = 0.05f + color_buffer.colors[voxel_id];
+	gl_Position = ubo.projection * vec4((in_position / 48.0f) + offset, 1.0f);
+	f_color = 0.066f + color_buffer.colors[voxel_id];
 }

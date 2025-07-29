@@ -354,6 +354,56 @@ int32_t main(int32_t argc, char** argv)
 							input_button_press(&input->move_up);
 							break;
 						}
+						case XK_r:
+						{
+							input_button_press(&input->move_ana);
+							break;
+						}
+						case XK_f:
+						{
+							input_button_press(&input->move_kata);
+							break;
+						}
+						case XK_t:
+						{
+							input_button_press(&input->move_up_a);
+							break;
+						}
+						case XK_g:
+						{
+							input_button_press(&input->move_down_a);
+							break;
+						}
+						case XK_y:
+						{
+							input_button_press(&input->move_up_b);
+							break;
+						}
+						case XK_h:
+						{
+							input_button_press(&input->move_down_b);
+							break;
+						}
+						case XK_u:
+						{
+							input_button_press(&input->move_up_c);
+							break;
+						}
+						case XK_j:
+						{
+							input_button_press(&input->move_down_c);
+							break;
+						}
+						case XK_i:
+						{
+							input_button_press(&input->move_up_d);
+							break;
+						}
+						case XK_k:
+						{
+							input_button_press(&input->move_down_d);
+							break;
+						}
 						case XK_Tab:
 						{
 							input_button_press(&input->change_mode);
@@ -398,6 +448,56 @@ int32_t main(int32_t argc, char** argv)
 							input_button_release(&input->move_up);
 							break;
 						}
+						case XK_r:
+						{
+							input_button_release(&input->move_ana);
+							break;
+						}
+						case XK_f:
+						{
+							input_button_release(&input->move_kata);
+							break;
+						}
+						case XK_t:
+						{
+							input_button_release(&input->move_up_a);
+							break;
+						}
+						case XK_g:
+						{
+							input_button_release(&input->move_down_a);
+							break;
+						}
+						case XK_y:
+						{
+							input_button_release(&input->move_up_b);
+							break;
+						}
+						case XK_h:
+						{
+							input_button_release(&input->move_down_b);
+							break;
+						}
+						case XK_u:
+						{
+							input_button_release(&input->move_up_c);
+							break;
+						}
+						case XK_j:
+						{
+							input_button_release(&input->move_down_c);
+							break;
+						}
+						case XK_i:
+						{
+							input_button_release(&input->move_up_d);
+							break;
+						}
+						case XK_k:
+						{
+							input_button_release(&input->move_down_d);
+							break;
+						}
 						case XK_Tab:
 						{
 							input_button_release(&input->change_mode);
@@ -409,19 +509,6 @@ int32_t main(int32_t argc, char** argv)
 				}
 				default: break;
 			}
-		}
-
-		// TODO - fix the actual issue. Right now, mouse_x has a tendency to go crazy
-		// when the mouse enters the window, so we are just filtering for that for now.
-		if(input->mouse_delta_x > 100)
-		{
-			printf("wtf mousex!\n");
-			input->mouse_delta_x = 0;
-		}
-		if(input->mouse_delta_y > 100)
-		{
-			printf("wtf mousey!\n");
-			input->mouse_delta_y = 0;
 		}
 
 		// Update time value

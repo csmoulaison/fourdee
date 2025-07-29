@@ -1,8 +1,16 @@
 #include "mode_pathtrace.c"
 #include "mode_holograph.c"
+#include "mode_waves.c"
 
 #define MODE_PATHTRACE 0
 #define MODE_HOLOGRAPH 1
+#define MODE_WAVE 2
+
+typedef struct
+{
+	// NOW, this will go here, and appear in a 4x4x4x4 array.
+	// I think we should possibly just set these as dimensions.
+} Mode;
 
 typedef struct
 {
@@ -19,6 +27,7 @@ typedef struct
 	{
 		PathtraceMode pathtrace;
 		HolographMode holograph;
+		WaveMode wave;
 	};
 } Game;
 
@@ -40,13 +49,22 @@ void mode_init(Game* game)
 			holograph->position = (Vec3f){ -2, -2, -2 };
 			break;
 		}
+		case MODE_WAVE:
+		{
+			WaveMode* wave = &game->wave;
+			wave->position = (Vec4f){ 0, 0, 0, 0 };
+			wave->scale = 4.0f;
+			wave->constant = 0.0f;
+			wave->multiplier = 1.0f;
+			break;
+		}
 		default: break;
 	}
 }
 
 void game_init(Game* game)
 {
-	game->mode = MODE_HOLOGRAPH;
+	game->mode = MODE_WAVE;
 	game->time_since_init = 0;
 
 	game->position= (Vec3f){ 0, 0, 0 };
@@ -101,6 +119,11 @@ void game_loop(Game* game, Input* input, float dt)
 			min_dist = 0.4f;
 			break;
 		}
+		case MODE_WAVE:
+		{
+			min_dist = 0.4f;
+			break;
+		}
 		default: break;
 	}
 
@@ -117,9 +140,9 @@ void game_loop(Game* game, Input* input, float dt)
 	{
 		game->target_distance = min_dist;
 	}
-	if(game->target_distance > 4.0f)
+	if(game->target_distance > 8.0f)
 	{
-		game->target_distance = 4.0f;
+		game->target_distance = 8.0f;
 	}
 
 	float distance_lerp_speed = 0.10f;
@@ -144,12 +167,16 @@ void game_loop(Game* game, Input* input, float dt)
 			holograph_mode_loop(&game->holograph, input, dt);
 			break;
 		}
+		case MODE_WAVE:
+		{
+			wave_mode_loop(&game->wave, input, dt);
+			break;
+		}
 		default: break;
 	}
 
 	if(input->change_mode.pressed)
 	{
-		printf("changing mode!\n");
 		if(game->mode == MODE_PATHTRACE)
 		{
 			game->mode = MODE_HOLOGRAPH;

@@ -1,6 +1,6 @@
 #version 430 core
 
-layout (local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+layout (local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
 layout(std430, binding = 0) buffer in_color_buffer
 {
@@ -29,7 +29,7 @@ layout(std140, binding = 1) uniform in_ubo
 
 float random_float()
 {
-	return fract(sin(ubo.time * (gl_LocalInvocationID.x + 1) * (gl_LocalInvocationID.y + 1)) * 1000000.0) / 1.5707;
+	return fract(sin(ubo.time * (gl_GlobalInvocationID.x + 1) * (gl_GlobalInvocationID.y + 1)) * 1000000.0) / 1.5707;
 }
 
 struct Hit
@@ -50,18 +50,18 @@ Hit sphere_intersect(vec3 point, Sphere sphere)
 
 void main()
 {
-	ivec3 invocation = ivec3(gl_LocalInvocationID.xyz);
-	int buffer_index = invocation.z * 64 + invocation.y * 8+ invocation.x;
+	ivec3 invocation = ivec3(gl_GlobalInvocationID.xyz);
+	int buffer_index = invocation.z * 64 + invocation.y * 8 + invocation.x;
 
 	vec2 screen = vec2(invocation.x - 0.5f + random_float() / 10.0f, invocation.y - 0.5f + random_float() / 10.0f);
 
 	float fov = 1;
-	float width = gl_NumWorkGroups.x;
-	float height = gl_NumWorkGroups.y;
+	float width = gl_NumWorkGroups.x * gl_WorkGroupSize.x;
+	float height = gl_NumWorkGroups.y * gl_WorkGroupSize.y;
 	float x =  (2.0 * (screen.x + 0.5) / width  - 1) * tan(fov / 2.0) * width / height;
 	float y = -(2.0 * (screen.y + 0.5) / height - 1) * tan(fov / 2.0);
 
-	vec3 point = vec3(ubo.camera_position + gl_LocalInvocationID.xyz);
+	vec3 point = vec3(ubo.camera_position + gl_GlobalInvocationID.xyz);
 
 	Sphere sphere = Sphere(vec3(0.0, 0.0, -1), 3);
 
@@ -77,11 +77,25 @@ void main()
 	{
 		color = 0.0f;
 	}
-	color += random_float() * 0.02f;
 
-	// NOW - this loop is only here because we aren't populating all colors yet.
-	for(int i = 0; i < 16; i++)
-	{
-		color_buffer.colors[buffer_index] = color;
-	}
+	// Code for a flicker across the grid which I spent too long on and don't like
+	// the look of.
+	// 
+	//float volume = width * width * width;
+	//float brightest_voxel = mod(ubo.time * volume * 12f, volume);
+	//float dist_a = abs(buffer_index - brightest_voxel);
+	//float dist_b;
+
+	//if(buffer_index < brightest_voxel)
+	//{
+	//	dist_b = clamp(abs((brightest_voxel - volume) - buffer_index), 0.0f, volume * 0.1f);
+	//}
+	//else
+	//{
+	//	dist_b = clamp(abs((brightest_voxel + volume) - buffer_index), 0.0f, volume * 0.1f);
+	//}
+
+	//color += ((dist_a + dist_b) / volume) * 0.03f;
+
+	color_buffer.colors[buffer_index] = color;
 }

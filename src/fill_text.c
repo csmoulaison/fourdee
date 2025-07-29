@@ -1,4 +1,4 @@
-uint32_t fill_text_buffer(char* s, TextChar* buffer, Vec2f position)
+uint32_t fill_text_buffer(char* s, TextChar* buffer, Vec2f position, float size)
 {
 	uint32_t i = 0;
 	while(s[i] != '\0')
@@ -103,7 +103,7 @@ uint32_t fill_text_buffer(char* s, TextChar* buffer, Vec2f position)
 			case '~': char_index = 94; break;
 			default: char_index = 0;
 		}
-		buffer[i] = (TextChar){char_index, position.x + i, position.y};
+		buffer[i] = (TextChar){char_index, position.x + i, position.y, size};
 		i++;
 	}
 	return i;

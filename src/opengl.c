@@ -21,7 +21,7 @@
 
 #include "voxel_sort.c"
 
-#define GRID_MAX_VOLUME 4096
+#define GRID_MAX_VOLUME 32768
 #define TEXT_MAX_CHARS 2048
 
 typedef struct
@@ -29,6 +29,7 @@ typedef struct
 	int32_t index;
 	float x;
 	float y;
+	float size;
 } TextChar;
 
 #include "fill_text.c"
@@ -62,10 +63,19 @@ typedef struct
 
 typedef struct
 {
+	Vec4f position;
+	float scale;
+	float constant;
+	float multiplier;
+} WaveUbo;
+
+typedef struct
+{
 	union
 	{
 		PathtraceUbo pathtrace;
 		HolographUbo holograph;
+		WaveUbo wave;
 	};
 } SpecialUbo;
 
@@ -99,6 +109,7 @@ typedef struct
 	// Compute programs
 	uint32_t pathtrace_program;
 	uint32_t holograph_program;
+	uint32_t wave_program;
 } GlContext;
 
 uint32_t gl_compile_shader(char* filename, GLenum type)
@@ -195,6 +206,13 @@ void gl_init(GlContext* gl)
 	glAttachShader(gl->holograph_program, holograph_shader);
 	glLinkProgram(gl->holograph_program);
 	glDeleteShader(holograph_shader);
+
+	// Wave program
+	uint32_t wave_shader = gl_compile_shader("shaders/wave.comp", GL_COMPUTE_SHADER);
+	gl->wave_program = glCreateProgram();
+	glAttachShader(gl->wave_program, wave_shader);
+	glLinkProgram(gl->wave_program);
+	glDeleteShader(wave_shader);
 
 	// Vertex arrays/buffers
 	float voxel_vertices[] =
@@ -335,7 +353,7 @@ void gl_init(GlContext* gl)
 void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 {
 	// Gl render
-	glClearColor(0.8, 0.8, 0.85, 1);
+	glClearColor(0.84, 0.84, 0.84, 1);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	// Game mode specific settings
@@ -361,7 +379,7 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 
 			break;
 		}
-		case MODE_HOLOGRAPH:
+		case MODE_HOLOGRAPH:		
 		{
 			compute_program = gl->holograph_program;
 			grid_length = 8;
@@ -370,6 +388,18 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 			holograph->time = game->time_since_init;
 			holograph->sphere = game->holograph.sphere;
 			holograph->position = game->holograph.position;
+			break;
+		}
+		case MODE_WAVE:		
+		{
+			compute_program = gl->wave_program;
+			grid_length = 16;
+
+			WaveUbo* wave = &special_ubo.wave;
+			wave->position = game->wave.position;
+			wave->scale = game->wave.scale;
+			wave->constant = game->wave.constant;
+			wave->multiplier = game->wave.multiplier;
 			break;
 		}
 		default: break;
@@ -390,14 +420,7 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	glBindBufferBase(GL_UNIFORM_BUFFER, 1, gl->special_ubo_buffer);
 	glUniformBlockBinding(compute_program, special_ubo_block_index, 0);
 
-	// TODO - this is only because we are still doing dumb 2d things
-	uint32_t dispatch_z = grid_length;
-	if(game->mode == MODE_PATHTRACE)
-	{
-		dispatch_z = 1;
-	}
-
-	glDispatchCompute(grid_length, grid_length, dispatch_z);
+	glDispatchCompute(grid_length / 4, grid_length / 4, grid_length / 4);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	// Update voxel ubo
@@ -453,40 +476,48 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	// Update text ssbo buffer
-	TextChar text_buffer[TEXT_MAX_CHARS];
-	//text_buffer[0] = (TextChar) {59, (Vec2f){ 0, 0 }};
-	//text_buffer[1] = (TextChar) {55, (Vec2f){ 0, 0 }};
-	//text_buffer[2] = (TextChar) {61, (Vec2f){ 0, 0 }};
-
-	//text_buffer[3] = (TextChar) {0, (Vec2f){ 0, 0 }};
-	//text_buffer[4] = (TextChar) {45, (Vec2f){ 0, 0 }};
-	//text_buffer[5] = (TextChar) {79, (Vec2f){ 0, 0 }};
-	//text_buffer[6] = (TextChar) {86, (Vec2f){ 0, 0 }};
-	//text_buffer[7] = (TextChar) {69, (Vec2f){ 0, 0 }};
-	//text_buffer[8] = (TextChar) {0, (Vec2f){ 0, 0 }};
-
-	// NOW - 1. Improve text rendering API, moving some of it to game code.
-	//       2. Reason about where different calculations should be made between
-	//          GPU and host. Probably a lot more here, obviously.
-	//       3. Keep in mind any additional features such as text color and things.
+	// 
+	// TODO - 1. Improve text rendering API, moving some of it to game code.
+	//        2. Reason about where different calculations should be made between
+	//           GPU and host. Probably a lot more here, obviously.
+	//        3. Keep in mind any additional features such as text color and things.
 	//           
 	// Then, we should probably move on to formalizing the way we are keeping track
 	// of level-specific things, and how they will end up in an asset.
 	//
 	// As a part of that, we will want to make the flow between levels and
 	// implement the level selector.
+	TextChar text_buffer[TEXT_MAX_CHARS];
 
-	char* s = "[W,S]   Move Z";
-	uint32_t text_i = fill_text_buffer(s, text_buffer, (Vec2f){0, 0});
+	char* control_str = "[A,D] Camera X    [Q,E] Camera Y    [W,S] Camera Z    [R,E] Camera W";
+	uint32_t text_i = fill_text_buffer(control_str, text_buffer, (Vec2f){4, 59}, 0.5f);
 
-	char* s2 = "[A,D]   Move X";
-	text_i += fill_text_buffer(s2, &text_buffer[text_i], (Vec2f){0, 1.5});
+	char* desc_str = "Fun with sine waves.";
+	text_i += fill_text_buffer(desc_str, &text_buffer[text_i], (Vec2f){2.35, 28.25}, 1.0f);
 
-	char* s3 = "[Q,E]   Move Y";
-	text_i += fill_text_buffer(s3, &text_buffer[text_i], (Vec2f){0, 3.0});
+#define DIMLEN 7
+	struct 
+	{
+		char control_down;
+		char control_up;
+		char name[64];
+		float value;
+	} dimensions[DIMLEN] = {
+		{ 'A', 'D', "Camera X", game->wave.position.x },
+		{ 'Q', 'E', "Camera Y", game->wave.position.y },
+		{ 'W', 'S', "Camera Z", game->wave.position.z },
+		{ 'R', 'F', "Camera W", game->wave.position.w },
+		{ 'T', 'G', "Scale", game->wave.scale },
+		{ 'Y', 'H', "Constant", game->wave.constant },
+		{ 'U', 'J', "Multiplier", game->wave.multiplier }
+	};
 
-	char* s4 = "[Mouse] Orbit";
-	text_i += fill_text_buffer(s4, &text_buffer[text_i], (Vec2f){0, 4.5});
+	for(uint8_t i = 0; i < DIMLEN ; i++)
+	{
+		char s[128];
+		sprintf(s, "[%c,%c] %s = %.1f", dimensions[i].control_down, dimensions[i].control_up, dimensions[i].name, dimensions[i].value);
+		text_i += fill_text_buffer(s, &text_buffer[text_i], (Vec2f){4, 2.5 + i * 1.5}, 0.5f);
+	}
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->text_buffer);
 	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(text_buffer), text_buffer);

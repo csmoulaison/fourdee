@@ -6,6 +6,7 @@ struct Char
 	int index;
 	float x;
 	float y;
+	float size;
 };
 
 // Includes all text written to the screen this frame.
@@ -26,15 +27,17 @@ out vec2 f_uv;
 
 void main()
 {
-	vec2 offset = vec2(-0.95f, 0.925f);
+	Char ch = text.chars[gl_InstanceID];
+	
+	vec2 offset = vec2(-1.0f, 1.0f);
 	vec2 text_pos = vec2(
-		text.chars[gl_InstanceID].x,
-		text.chars[gl_InstanceID].y
-	) * 2.0f;
-	gl_Position = vec4((ubo.transform * (in_position + text_pos)) + offset, -1.0f, 1.0f);
+		ch.x,
+		ch.y
+	) * ch.size * 2.0f;
+	gl_Position = vec4((ubo.transform * ((in_position * ch.size) + text_pos)) + offset, -1.0f, 1.0f);
 	f_color = 0.25f;
 
-	int i = text.chars[gl_InstanceID].index;
+	int i = ch.index;
 	float x = mod(i, 16.0f);
 	float y = -5.0f + i / 16;
 	vec2 char_offset = vec2(x, y) * 2.0f;

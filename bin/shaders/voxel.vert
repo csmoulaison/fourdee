@@ -19,6 +19,7 @@ layout(std140, binding = 0) uniform in_ubo
 
 out float f_color;
 
+// TODO - Frustum culling for when we are inside the cube, if we want that in the first place.
 void main()
 {
 	int voxel_id = instance_to_voxel_buffer.map[gl_InstanceID];
@@ -28,5 +29,5 @@ void main()
 	offset /= 16.0f;
 
 	gl_Position = ubo.projection * vec4((in_position / 48.0f) + offset, 1.0f);
-	f_color = 0.066f + color_buffer.colors[voxel_id];
+	f_color = 0.05f + color_buffer.colors[voxel_id];
 }

@@ -30,6 +30,8 @@ typedef struct
 	uint32_t window_height;
 	uint32_t mouse_moved_yet;
 	uint32_t mouse_just_warped;
+	int32_t stored_cursor_x;
+	int32_t stored_cursor_y;
 
 	struct timespec time_previous;
 
@@ -116,7 +118,7 @@ int32_t main(int32_t argc, char** argv)
 		.colormap = XCreateColormap(xlib.display, root_window, visual_info->visual, AllocNone),
 		.background_pixmap = None,
 		.border_pixel = 0,
-		.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask | KeyReleaseMask | PointerMotionMask | ButtonPressMask
+		.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask | KeyReleaseMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask
 	};
 
 	// Here's where our xlib window is created. This will be snipped out if/when we are graphics API independent.
@@ -196,11 +198,12 @@ int32_t main(int32_t argc, char** argv)
 	glXMakeCurrent(xlib.display, xlib.window, glx);
 
 	// Lock and hide mouse cursor
-	XGrabPointer(xlib.display, xlib.window, 1, PointerMotionMask, GrabModeAsync, GrabModeAsync, xlib.window, None, CurrentTime);
-	XFixesHideCursor(xlib.display, xlib.window);
-	XSync(xlib.display, 1);
+	//XGrabPointer(xlib.display, xlib.window, 1, PointerMotionMask, GrabModeAsync, GrabModeAsync, xlib.window, None, CurrentTime);
+	//XFixesHideCursor(xlib.display, xlib.window);
+	//XSync(xlib.display, 1);
 
-	gl_init(&xlib.gl);
+	game_init(&xlib.game);
+	gl_init(&xlib.gl, &xlib.game);
 
 	XWindowAttributes window_attributes;
 	XGetWindowAttributes(xlib.display, xlib.window, &window_attributes);
@@ -208,7 +211,6 @@ int32_t main(int32_t argc, char** argv)
 	xlib.window_height = window_attributes.height;
 	glViewport(0, 0, xlib.window_width, xlib.window_height);
 
-	game_init(&xlib.game);
 
 	// Initialize input to default
 	xlib.input.mouse_delta_x = 0;
@@ -280,6 +282,11 @@ int32_t main(int32_t argc, char** argv)
 					input->mouse_x = event.xmotion.x;
 					input->mouse_y = event.xmotion.y;
 
+					if(!input->mouse_left.held)
+					{
+						break;
+					}
+
 					int32_t bounds_x = xlib.window_width / 4;
 					int32_t bounds_y = xlib.window_height / 4;
 					if(input->mouse_x < bounds_x ||
@@ -305,6 +312,22 @@ int32_t main(int32_t argc, char** argv)
 				{
 					switch(event.xbutton.button)
 					{
+						case 1:
+						{
+							input_button_press(&input->mouse_left);
+							xlib.stored_cursor_x = input->mouse_x;
+							xlib.stored_cursor_y = input->mouse_y;
+
+							XGrabPointer(xlib.display, xlib.window, 1, PointerMotionMask, GrabModeAsync, GrabModeAsync, xlib.window, None, CurrentTime);
+							XFixesHideCursor(xlib.display, xlib.window);
+							XSync(xlib.display, 1);
+							break;
+						}
+						case 3:
+						{
+							input_button_press(&input->mouse_right);
+							break;
+						}
 						case 4:
 						{
 							input->mouse_scroll_up = true;
@@ -313,6 +336,34 @@ int32_t main(int32_t argc, char** argv)
 						case 5:
 						{
 							input->mouse_scroll_down = true;
+							break;
+						}
+						default: break;
+					}
+					break;
+				}
+				case ButtonRelease:
+				{
+					switch(event.xbutton.button)
+					{
+						case 1:
+						{
+							input_button_release(&input->mouse_left);
+							XUngrabPointer(xlib.display, CurrentTime);
+							XFixesShowCursor(xlib.display, xlib.window);
+							XWarpPointer(
+								xlib.display,
+								None,
+								event.xmotion.window,
+								0, 0, 0, 0,
+								xlib.stored_cursor_x, xlib.stored_cursor_y);
+							XSync(xlib.display, 0);
+							XSync(xlib.display, 1);
+							break;
+						}
+						case 3:
+						{
+							input_button_release(&input->mouse_right);
 							break;
 						}
 						default: break;
@@ -531,11 +582,11 @@ int32_t main(int32_t argc, char** argv)
 		{
 			printf("\033[2J\033[H");
 			printf("x: %f\ny: %f\nz: %f\nphi: %f\ntheta: %f\n", 
-				xlib.game.position.x,
-				xlib.game.position.y,
-				xlib.game.position.z,
-				xlib.game.phi,
-				xlib.game.theta
+				xlib.game.cam_position.x,
+				xlib.game.cam_position.y,
+				xlib.game.cam_position.z,
+				xlib.game.cam_phi,
+				xlib.game.cam_theta
 			);
 		}
 	}

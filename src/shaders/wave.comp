@@ -28,5 +28,6 @@ void main()
 
 	float sines = sin(posx) + sin(posy) + sin(posz) + sin(posw);
 	sines = sines;
-	color_buffer.colors[buffer_index] = (sines * sines) * ubo.multiplier  + ubo.constant;
+	float result = (sines * sines) * ubo.multiplier + ubo.constant;
+	color_buffer.colors[buffer_index] = clamp(result, 0.0f, result);
 }

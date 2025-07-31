@@ -1,5 +1,5 @@
 // VOLATILE - this must match the number of buttons defined in input_state.
-#define INPUT_BUTTONS_LEN 18
+#define INPUT_BUTTONS_LEN 20
 
 typedef struct
 {
@@ -23,6 +23,8 @@ typedef struct
     	InputButton buttons[INPUT_BUTTONS_LEN];
     	struct 
     	{
+	    	InputButton mouse_left;
+	    	InputButton mouse_right;
         	InputButton move_forward;
         	InputButton move_back;
         	InputButton move_left;

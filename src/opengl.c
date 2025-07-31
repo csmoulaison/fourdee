@@ -49,38 +49,6 @@ typedef struct
 
 typedef struct
 {
-	Sphere sphere;
-	Vec3f position;
-	float time;
-} PathtraceUbo;
-
-typedef struct
-{
-	Sphere sphere;
-	Vec3f position;
-	float time;
-} HolographUbo;
-
-typedef struct
-{
-	Vec4f position;
-	float scale;
-	float constant;
-	float multiplier;
-} WaveUbo;
-
-typedef struct
-{
-	union
-	{
-		PathtraceUbo pathtrace;
-		HolographUbo holograph;
-		WaveUbo wave;
-	};
-} SpecialUbo;
-
-typedef struct
-{
 	int32_t map[GRID_MAX_VOLUME];
 } InstanceToVoxelSsbo;
 
@@ -92,7 +60,7 @@ typedef struct
 	// UBOs
 	uint32_t voxel_ubo_buffer;
 	uint32_t text_ubo_buffer;
-	uint32_t special_ubo_buffer;
+	uint32_t mode_data_ubo_buffer;
 
 	// SSBOs
 	uint32_t text_buffer;
@@ -107,9 +75,7 @@ typedef struct
 	uint32_t text_program;
 
 	// Compute programs
-	uint32_t pathtrace_program;
-	uint32_t holograph_program;
-	uint32_t wave_program;
+	uint32_t mode_programs[MAX_DIMENSIONS];
 } GlContext;
 
 uint32_t gl_compile_shader(char* filename, GLenum type)
@@ -157,7 +123,7 @@ uint32_t gl_compile_shader(char* filename, GLenum type)
 }
 
 
-void gl_init(GlContext* gl)
+void gl_init(GlContext* gl, Game* game)
 {
 	if(gl3wInit() != 0) 
 	{
@@ -192,27 +158,18 @@ void gl_init(GlContext* gl)
 	glDeleteShader(text_vert_shader);
 	glDeleteShader(text_frag_shader);
 
-	// Pathtrace program
-	// TODO - further factor out compute program creation
-	uint32_t pathtrace_shader = gl_compile_shader("shaders/pathtrace.comp", GL_COMPUTE_SHADER);
-	gl->pathtrace_program = glCreateProgram();
-	glAttachShader(gl->pathtrace_program, pathtrace_shader);
-	glLinkProgram(gl->pathtrace_program);
-	glDeleteShader(pathtrace_shader);
+	// Mode programs
+	for(uint8_t i = 0; i < 3; i++) // TODO - change to MODES_COUNT
+	{
+		Mode* mode = &game->modes[i];
 
-	// Holograph program
-	uint32_t holograph_shader = gl_compile_shader("shaders/holograph.comp", GL_COMPUTE_SHADER);
-	gl->holograph_program = glCreateProgram();
-	glAttachShader(gl->holograph_program, holograph_shader);
-	glLinkProgram(gl->holograph_program);
-	glDeleteShader(holograph_shader);
-
-	// Wave program
-	uint32_t wave_shader = gl_compile_shader("shaders/wave.comp", GL_COMPUTE_SHADER);
-	gl->wave_program = glCreateProgram();
-	glAttachShader(gl->wave_program, wave_shader);
-	glLinkProgram(gl->wave_program);
-	glDeleteShader(wave_shader);
+		uint32_t mode_shader = gl_compile_shader(mode->compute_filename, GL_COMPUTE_SHADER);
+		gl->mode_programs[i] = glCreateProgram();
+		glAttachShader(gl->mode_programs[i], mode_shader);
+		glLinkProgram(gl->mode_programs[i]);
+		glDeleteShader(mode_shader);
+		printf("moder\n");
+	}
 
 	// Vertex arrays/buffers
 	float voxel_vertices[] =
@@ -344,9 +301,9 @@ void gl_init(GlContext* gl)
 	glBufferData(GL_UNIFORM_BUFFER, sizeof(TextUbo), NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-	glGenBuffers(1, &gl->special_ubo_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, gl->special_ubo_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(SpecialUbo), NULL, GL_DYNAMIC_DRAW);
+	glGenBuffers(1, &gl->mode_data_ubo_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, gl->mode_data_ubo_buffer);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(float[MAX_DIMENSIONS]), NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -357,68 +314,24 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	// Game mode specific settings
-	SpecialUbo special_ubo;
-	uint32_t compute_program;
+	Mode* mode = &game->modes[game->current_mode];
+	uint32_t mode_program = gl->mode_programs[game->current_mode];
 
-	uint32_t grid_length;
-	uint32_t grid_area;
-	uint32_t grid_volume;
-	
-	switch(game->mode)
-	{
-		case MODE_PATHTRACE:
-		{
-			// TODO - Factor out getting these bits populated.
-			compute_program = gl->pathtrace_program;
-			grid_length = 16;
-
-			PathtraceUbo* pathtrace = &special_ubo.pathtrace;
-			pathtrace->time = game->time_since_init;
-			pathtrace->sphere = game->pathtrace.sphere;
-			pathtrace->position = game->pathtrace.position;
-
-			break;
-		}
-		case MODE_HOLOGRAPH:		
-		{
-			compute_program = gl->holograph_program;
-			grid_length = 8;
-
-			HolographUbo* holograph = &special_ubo.holograph;
-			holograph->time = game->time_since_init;
-			holograph->sphere = game->holograph.sphere;
-			holograph->position = game->holograph.position;
-			break;
-		}
-		case MODE_WAVE:		
-		{
-			compute_program = gl->wave_program;
-			grid_length = 16;
-
-			WaveUbo* wave = &special_ubo.wave;
-			wave->position = game->wave.position;
-			wave->scale = game->wave.scale;
-			wave->constant = game->wave.constant;
-			wave->multiplier = game->wave.multiplier;
-			break;
-		}
-		default: break;
-	}
-
-	grid_area = grid_length * grid_length;
-	grid_volume = grid_length * grid_area;
+	uint32_t grid_length = mode->grid_length;
+	uint32_t grid_area = grid_length * grid_length;
+	uint32_t grid_volume = grid_length * grid_area;
 
 	// Update buffer
-	glBindBuffer(GL_UNIFORM_BUFFER, gl->special_ubo_buffer);
-	void* p_special_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	memcpy(p_special_ubo, &special_ubo, sizeof(special_ubo));
+	glBindBuffer(GL_UNIFORM_BUFFER, gl->mode_data_ubo_buffer);
+	void* p_mode_data_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	memcpy(p_mode_data_ubo, &game->mode_data, sizeof(float[MAX_DIMENSIONS]));
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	// Dispatch compute program
-	glUseProgram(compute_program);
-	uint32_t special_ubo_block_index = glGetUniformBlockIndex(compute_program, "ubo");
-	glBindBufferBase(GL_UNIFORM_BUFFER, 1, gl->special_ubo_buffer);
-	glUniformBlockBinding(compute_program, special_ubo_block_index, 0);
+	glUseProgram(mode_program);
+	uint32_t mode_data_ubo_block_index = glGetUniformBlockIndex(mode_program, "ubo");
+	glBindBufferBase(GL_UNIFORM_BUFFER, 1, gl->mode_data_ubo_buffer);
+	glUniformBlockBinding(mode_program, mode_data_ubo_block_index, 0);
 
 	glDispatchCompute(grid_length / 4, grid_length / 4, grid_length / 4);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -434,7 +347,7 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	glm_mat4_identity(view);
 	Vec3f cam_target = {0, 0, 0};
 	Vec3f up = {0, 1, 0};
-	glm_lookat((float*)&game->position, (float*)&cam_target, (float*)&up, view);
+	glm_lookat((float*)&game->cam_position, (float*)&cam_target, (float*)&up, view);
 
 	glm_mat4_mul(perspective, view, voxel_ubo.projection);
 
@@ -445,7 +358,7 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 
 	// Update instance to voxel map ssbo
 	int32_t instance_to_voxel_map[grid_volume];
-	Vec3f cam_pos = game->position;
+	Vec3f cam_pos = game->cam_position;
 
 	sort_voxels(instance_to_voxel_map, grid_length, grid_area, grid_volume, cam_pos);
 
@@ -489,34 +402,33 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	// implement the level selector.
 	TextChar text_buffer[TEXT_MAX_CHARS];
 
-	char* control_str = "[A,D] Camera X    [Q,E] Camera Y    [W,S] Camera Z    [R,E] Camera W";
-	uint32_t text_i = fill_text_buffer(control_str, text_buffer, (Vec2f){4, 59}, 0.5f);
-
 	char* desc_str = "Fun with sine waves.";
-	text_i += fill_text_buffer(desc_str, &text_buffer[text_i], (Vec2f){2.35, 28.25}, 1.0f);
+	uint32_t text_i = fill_text_buffer(desc_str, text_buffer, (Vec2f){2.35, 28.25}, 1.0f);
+
+	char* sub_desc_str = "This is just a small showcase of what our world, nay, our universe, is capable of.";
+	text_i += fill_text_buffer(sub_desc_str, &text_buffer[text_i], (Vec2f){4, 59}, 0.5f);
 
 #define DIMLEN 7
 	struct 
 	{
 		char control_down;
 		char control_up;
-		char name[64];
-		float value;
 	} dimensions[DIMLEN] = {
-		{ 'A', 'D', "Camera X", game->wave.position.x },
-		{ 'Q', 'E', "Camera Y", game->wave.position.y },
-		{ 'W', 'S', "Camera Z", game->wave.position.z },
-		{ 'R', 'F', "Camera W", game->wave.position.w },
-		{ 'T', 'G', "Scale", game->wave.scale },
-		{ 'Y', 'H', "Constant", game->wave.constant },
-		{ 'U', 'J', "Multiplier", game->wave.multiplier }
+		{ 'A', 'D' },
+		{ 'Q', 'E' },
+		{ 'W', 'S' },
+		{ 'R', 'F' },
+		{ 'T', 'G' },
+		{ 'Y', 'H' },
+		{ 'U', 'J' }
 	};
 
 	for(uint8_t i = 0; i < DIMLEN ; i++)
 	{
 		char s[128];
-		sprintf(s, "[%c,%c] %s = %.1f", dimensions[i].control_down, dimensions[i].control_up, dimensions[i].name, dimensions[i].value);
-		text_i += fill_text_buffer(s, &text_buffer[text_i], (Vec2f){4, 2.5 + i * 1.5}, 0.5f);
+		//sprintf(s, "[%c,%c] %.1f", dimensions[i].control_down, dimensions[i].control_up, game->mode_data[i]);
+		sprintf(s, "[%i] %.1f", i, game->mode_data[i]);
+		text_i += fill_text_buffer(s, &text_buffer[text_i], (Vec2f){4, 2.5 + i * 1.5}, 0.66f);
 	}
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->text_buffer);

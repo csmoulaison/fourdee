@@ -4,19 +4,29 @@ typedef struct
 	Vec3f position;
 } HolographMode;
 
-void holograph_mode_loop(HolographMode* holograph, Input* input, float dt)
+void holograph_mode_init(float* values)
 {
-	float speed = 0.1;
+	HolographMode* mode = (HolographMode*)values;
+
+	mode->sphere = (Sphere){ .center = { 0, 0, 0 }, .radius = 1 };
+	mode->position = (Vec3f){ -2, -2, -2 };
+}
+
+void holograph_mode_update(float* values, Input* input, float dt)
+{
+	HolographMode* mode = (HolographMode*)values;
+
+	float speed = 0.1f;
 	if(input->move_forward.held) 
-		holograph->position.z += speed;
+		mode->position.z += speed;
 	if(input->move_left.held) 
-		holograph->position.x += speed;
+		mode->position.x += speed;
 	if(input->move_back.held)
-		holograph->position.z -= speed;
+		mode->position.z -= speed;
 	if(input->move_right.held) 
-		holograph->position.x -= speed;
+		mode->position.x -= speed;
 	if(input->move_up.held)
-		holograph->position.y += speed;
+		mode->position.y += speed;
 	if(input->move_down.held) 
-		holograph->position.y -= speed;
+		mode->position.y -= speed;
 }

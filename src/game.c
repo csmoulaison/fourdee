@@ -6,74 +6,48 @@
 #define MODE_HOLOGRAPH 1
 #define MODE_WAVE 2
 
+#define MODES_COUNT 256
+#define MAX_DIMENSIONS 32
+
 typedef struct
 {
-	// NOW, this will go here, and appear in a 4x4x4x4 array.
-	// I think we should possibly just set these as dimensions.
+	char compute_filename[32];
+	uint8_t grid_length; // NOW path 16   holo 8   wave 16
+
+	void (*init)(float* data);
+	void (*update)(float* data, Input* input, float dt);
 } Mode;
 
 typedef struct
 {
-	uint8_t mode;
 	float time_since_init;
 
-	Vec3f position;
-	float phi;
-	float theta;
-	float distance;
-	float target_distance;
+	Vec3f cam_position;
+	float cam_phi;
+	float cam_theta;
+	float cam_distance;
+	float cam_target_distance;
 
-	union
-	{
-		PathtraceMode pathtrace;
-		HolographMode holograph;
-		WaveMode wave;
-	};
+	Mode modes[MODES_COUNT];
+	uint8_t current_mode;
+	float mode_data[MAX_DIMENSIONS];
 } Game;
-
-void mode_init(Game* game)
-{
-	switch(game->mode)
-	{
-		case MODE_PATHTRACE:
-		{
-			PathtraceMode* pathtrace = &game->pathtrace;
-			pathtrace->sphere = (Sphere){ .center = { 0, 0, -3 }, .radius = 1 };
-			pathtrace->position = (Vec3f){ 0, 0, 0 };
-			break;
-		}
-		case MODE_HOLOGRAPH:
-		{
-			HolographMode* holograph = &game->holograph;
-			holograph->sphere = (Sphere){ .center = { 0, 0, 0 }, .radius = 1 };
-			holograph->position = (Vec3f){ -2, -2, -2 };
-			break;
-		}
-		case MODE_WAVE:
-		{
-			WaveMode* wave = &game->wave;
-			wave->position = (Vec4f){ 0, 0, 0, 0 };
-			wave->scale = 4.0f;
-			wave->constant = 0.0f;
-			wave->multiplier = 1.0f;
-			break;
-		}
-		default: break;
-	}
-}
 
 void game_init(Game* game)
 {
-	game->mode = MODE_WAVE;
 	game->time_since_init = 0;
 
-	game->position= (Vec3f){ 0, 0, 0 };
-	game->phi = 1.1;
-	game->theta = 1.2;
-	game->distance = 15;
-	game->target_distance = 2;
+	game->cam_position= (Vec3f){ 0, 0, 0 };
+	game->cam_phi = 1.1;
+	game->cam_theta = 1.2;
+	game->cam_distance = 15;
+	game->cam_target_distance = 2;
 
-	mode_init(game);
+	game->current_mode = 0;
+	game->modes[0] = (Mode) { .compute_filename = "shaders/wave.comp",      .grid_length = 16, .init = wave_mode_init,      .update = wave_mode_update },
+	game->modes[1] = (Mode) { .compute_filename = "shaders/holograph.comp", .grid_length = 8,  .init = holograph_mode_init, .update = holograph_mode_update },
+	game->modes[2] = (Mode) { .compute_filename = "shaders/trace.comp",     .grid_length = 16, .init = pathtrace_mode_init, .update = pathtrace_mode_update },
+	game->modes[game->current_mode].init(game->mode_data);
 }
 
 void game_loop(Game* game, Input* input, float dt)
@@ -81,110 +55,91 @@ void game_loop(Game* game, Input* input, float dt)
 	game->time_since_init += dt;
 
 	float speed = 0.005;
-	game->phi += input->mouse_delta_y * speed;
-	game->theta -= input->mouse_delta_x * speed;
-
-	if(game->phi < 0.01)
+	if(input->mouse_left.held)
 	{
-		game->phi = 0.01;
-	}
-	if(game->phi > 3.14)
-	{
-		game->phi = 3.14;
+		game->cam_phi += input->mouse_delta_y * speed;
+		game->cam_theta -= input->mouse_delta_x * speed;
 	}
 
-	if(game->theta < 0)
+	if(game->cam_phi < 0.01)
 	{
-		game->theta += 3.14159 * 2;
+		game->cam_phi = 0.01;
 	}
-	if(game->theta > 3.14159 * 2)
+	if(game->cam_phi > 3.14)
 	{
-		game->theta -= 3.14159 * 2;
-	}
-	if(game->theta > 10)
-	{
-		game->theta = 0;
+		game->cam_phi = 3.14;
 	}
 
-	float min_dist = 0;
-	switch(game->mode)
+	if(game->cam_theta < 0)
 	{
-		case MODE_PATHTRACE:
-		{
-			min_dist = 1.4f;
-			break;
-		}
-		case MODE_HOLOGRAPH:
-		{
-			min_dist = 0.4f;
-			break;
-		}
-		case MODE_WAVE:
-		{
-			min_dist = 0.4f;
-			break;
-		}
-		default: break;
+		game->cam_theta += 3.14159 * 2;
+	}
+	if(game->cam_theta > 3.14159 * 2)
+	{
+		game->cam_theta -= 3.14159 * 2;
+	}
+	if(game->cam_theta > 10)
+	{
+		game->cam_theta = 0;
 	}
 
+	float min_dist = 0.8f;
 	float scroll_speed = 0.2;
 	if(input->mouse_scroll_up == true)
 	{
-		game->target_distance -= scroll_speed;
+		game->cam_target_distance -= scroll_speed;
 	}
 	if(input->mouse_scroll_down == true)
 	{
-		game->target_distance += scroll_speed;
+		game->cam_target_distance += scroll_speed;
 	}
-	if(game->target_distance < min_dist)
+	if(game->cam_target_distance < min_dist)
 	{
-		game->target_distance = min_dist;
+		game->cam_target_distance = min_dist;
 	}
-	if(game->target_distance > 8.0f)
+	if(game->cam_target_distance > 8.0f)
 	{
-		game->target_distance = 8.0f;
-	}
-
-	float distance_lerp_speed = 0.10f;
-	if(game->distance != game->target_distance)
-	{
-		game->distance = lerp(game->distance, game->target_distance, distance_lerp_speed);
+		game->cam_target_distance = 8.0f;
 	}
 
-	game->position.x = game->distance * sin(game->phi) * cos(game->theta);
-	game->position.y = game->distance * cos(game->phi);
-	game->position.z = game->distance * sin(game->phi) * sin(game->theta);
-
-	switch(game->mode)
+	float zoom_lerp_speed = 0.10f;
+	if(game->cam_distance != game->cam_target_distance)
 	{
-		case MODE_PATHTRACE:
-		{
-			pathtrace_mode_loop(&game->pathtrace, input, dt);
-			break;
-		}
-		case MODE_HOLOGRAPH:
-		{
-			holograph_mode_loop(&game->holograph, input, dt);
-			break;
-		}
-		case MODE_WAVE:
-		{
-			wave_mode_loop(&game->wave, input, dt);
-			break;
-		}
-		default: break;
+		game->cam_distance = lerp(game->cam_distance, game->cam_target_distance, zoom_lerp_speed);
 	}
 
-	if(input->change_mode.pressed)
+	game->cam_position.x = game->cam_distance * sin(game->cam_phi) * cos(game->cam_theta);
+	game->cam_position.y = game->cam_distance * cos(game->cam_phi);
+	game->cam_position.z = game->cam_distance * sin(game->cam_phi) * sin(game->cam_theta);
+
+	game->modes[game->current_mode].update(game->mode_data, input, dt);
+
+	if(input->change_mode.held)
 	{
-		if(game->mode == MODE_PATHTRACE)
+		uint8_t tmp_wrap = 2;
+		if(input->move_left.pressed)
 		{
-			game->mode = MODE_HOLOGRAPH;
+			if(game->current_mode == 0)
+			{
+				game->current_mode = tmp_wrap;
+			}
+			else
+			{
+				game->current_mode--;
+			}
+			game->modes[game->current_mode].init(game->mode_data);
 		}
-		else
+		if(input->move_right.pressed)
 		{
-			game->mode = MODE_PATHTRACE;
+			if(game->current_mode == tmp_wrap)
+			{
+				game->current_mode = 0;
+			}
+			else
+			{
+				game->current_mode++;
+			}
+			game->modes[game->current_mode].init(game->mode_data);
 		}
-		mode_init(game);
 	}
 }

@@ -1,7 +1,3 @@
-// NOW we are adding a third mode simply to brush up on the process as it stands at the moment,
-// after which we will bake all of this into a struct, making all mode specific logic in the
-// routines. Some light OOP.
-
 typedef struct
 {
 	Vec4f position;
@@ -10,41 +6,51 @@ typedef struct
 	float multiplier;
 } WaveMode;
 
-void wave_mode_loop(WaveMode* wave, Input* input, float dt)
+void wave_mode_init(float* data)
 {
+	WaveMode* mode = (WaveMode*)data;
+
+	mode->position = (Vec4f){ 0, 0, 0, 0 };
+	mode->scale = 4.0f;
+	mode->constant = 0.0f;
+	mode->multiplier = 1.0f;
+}
+
+void wave_mode_update(float* data, Input* input, float dt)
+{
+	WaveMode* mode = (WaveMode*)data;
+
 	float speed = 0.1;
 	if(input->move_forward.held) 
-		wave->position.z += speed;
+		mode->position.z += speed;
 	if(input->move_left.held) 
-		wave->position.x += speed;
+		mode->position.x += speed;
 	if(input->move_back.held)
-		wave->position.z -= speed;
+		mode->position.z -= speed;
 	if(input->move_right.held) 
-		wave->position.x -= speed;
+		mode->position.x -= speed;
 	if(input->move_up.held)
-		wave->position.y += speed;
+		mode->position.y += speed;
 	if(input->move_down.held) 
-		wave->position.y -= speed;
-
-	speed = 0.05;
+		mode->position.y -= speed;
 	if(input->move_ana.held)
-		wave->position.w += speed;
+		mode->position.w += speed;
 	if(input->move_kata.held) 
-		wave->position.w -= speed;
+		mode->position.w -= speed;
 
 	speed = 0.05;
 	if(input->move_up_a.held)
-		wave->scale += speed;
+		mode->scale += speed;
 	if(input->move_down_a.held) 
-		wave->scale -= speed;
+		mode->scale -= speed;
 
 	if(input->move_up_b.held)
-		wave->constant += speed;
+		mode->constant += speed;
 	if(input->move_down_b.held) 
-		wave->constant -= speed;
+		mode->constant -= speed;
 
 	if(input->move_up_c.held)
-		wave->multiplier += speed;
+		mode->multiplier += speed;
 	if(input->move_down_c.held) 
-		wave->multiplier -= speed;
+		mode->multiplier -= speed;
 }

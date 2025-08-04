@@ -9,6 +9,7 @@ layout(std430, binding = 0) buffer in_color_buffer
 
 layout(std140, binding = 1) uniform in_ubo
 {
+	float time;
 	vec4 camera_position;
 	float scale;
 	float constant;

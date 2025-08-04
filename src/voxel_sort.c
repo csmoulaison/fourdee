@@ -1,4 +1,5 @@
-void sort_voxels(int32_t* instance_to_voxel_map, uint32_t grid_length, uint32_t grid_area, uint32_t grid_volume, Vec3f cam_pos)
+// TODO - We'll need to provide a rotation matrix to face the individual triangles away from the camera as well.
+void sort_voxels(int32_t* instance_to_voxel_map, uint32_t grid_length, uint32_t grid_area, uint32_t grid_volume, float* cam_pos)
 {
 	// All these variables suffexed "_term" will be 0 or 1, and are used to
 	// selectively terms we don't want in the final calculation.
@@ -20,9 +21,9 @@ void sort_voxels(int32_t* instance_to_voxel_map, uint32_t grid_length, uint32_t 
 	int32_t z_row_term = 0;
 	int32_t z_slice_term = 0;
 
-	float x_abs = fabs(cam_pos.x);
-	float y_abs = fabs(cam_pos.y);
-	float z_abs = fabs(cam_pos.z);
+	float x_abs = fabs(cam_pos[0]);
+	float y_abs = fabs(cam_pos[1]);
+	float z_abs = fabs(cam_pos[2]);
 
 	if(z_abs > y_abs)
 	{
@@ -72,7 +73,7 @@ void sort_voxels(int32_t* instance_to_voxel_map, uint32_t grid_length, uint32_t 
 		}
 	}
 
-	if(cam_pos.x >= 0)
+	if(cam_pos[0] >= 0)
 	{
 		x_positive_term = 1;
 	}
@@ -81,7 +82,7 @@ void sort_voxels(int32_t* instance_to_voxel_map, uint32_t grid_length, uint32_t 
 		x_negative_term = 1;
 	}
 
-	if(cam_pos.y >= 0)
+	if(cam_pos[1] >= 0)
 	{
 		y_positive_term = 1;
 	}
@@ -90,7 +91,7 @@ void sort_voxels(int32_t* instance_to_voxel_map, uint32_t grid_length, uint32_t 
 		y_negative_term = 1;
 	}
 
-	if(cam_pos.z >= 0)
+	if(cam_pos[2] >= 0)
 	{
 		z_positive_term = 1;
 	}

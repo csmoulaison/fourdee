@@ -1,5 +1,5 @@
 typedef struct 
 {
-	Vec3f center;
+	float center[3];
 	float radius;
 } Sphere;

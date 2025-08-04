@@ -582,9 +582,9 @@ int32_t main(int32_t argc, char** argv)
 		{
 			printf("\033[2J\033[H");
 			printf("x: %f\ny: %f\nz: %f\nphi: %f\ntheta: %f\n", 
-				xlib.game.cam_position.x,
-				xlib.game.cam_position.y,
-				xlib.game.cam_position.z,
+				xlib.game.cam_position[0],
+				xlib.game.cam_position[1],
+				xlib.game.cam_position[2],
 				xlib.game.cam_phi,
 				xlib.game.cam_theta
 			);

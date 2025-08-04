@@ -1,6 +1,6 @@
 typedef struct
 {
-	Vec4f position;
+	float position[4];
 	float scale;
 	float constant;
 	float multiplier;
@@ -10,7 +10,7 @@ void wave_mode_init(float* data)
 {
 	WaveMode* mode = (WaveMode*)data;
 
-	mode->position = (Vec4f){ 0, 0, 0, 0 };
+	v4_init(mode->position, 0.0f, 0.0f, 0.0f, 0.0f);
 	mode->scale = 4.0f;
 	mode->constant = 0.0f;
 	mode->multiplier = 1.0f;
@@ -22,21 +22,21 @@ void wave_mode_update(float* data, Input* input, float dt)
 
 	float speed = 0.1;
 	if(input->move_forward.held) 
-		mode->position.z += speed;
+		mode->position[2] += speed;
 	if(input->move_left.held) 
-		mode->position.x += speed;
+		mode->position[0] += speed;
 	if(input->move_back.held)
-		mode->position.z -= speed;
+		mode->position[2] -= speed;
 	if(input->move_right.held) 
-		mode->position.x -= speed;
+		mode->position[0] -= speed;
 	if(input->move_up.held)
-		mode->position.y += speed;
+		mode->position[1] += speed;
 	if(input->move_down.held) 
-		mode->position.y -= speed;
+		mode->position[1] -= speed;
 	if(input->move_ana.held)
-		mode->position.w += speed;
+		mode->position[3] += speed;
 	if(input->move_kata.held) 
-		mode->position.w -= speed;
+		mode->position[3] -= speed;
 
 	speed = 0.05;
 	if(input->move_up_a.held)

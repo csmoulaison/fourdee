@@ -22,9 +22,9 @@ struct Sphere
 
 layout(std140, binding = 1) uniform in_ubo
 {
-	Sphere sphere;
-	vec3 camera_position;
 	float time;
+	vec3 camera_position;
+	Sphere sphere;
 } ubo;
 
 float random_float()
@@ -77,25 +77,6 @@ void main()
 	{
 		color = 0.0f;
 	}
-
-	// Code for a flicker across the grid which I spent too long on and don't like
-	// the look of.
-	// 
-	//float volume = width * width * width;
-	//float brightest_voxel = mod(ubo.time * volume * 12f, volume);
-	//float dist_a = abs(buffer_index - brightest_voxel);
-	//float dist_b;
-
-	//if(buffer_index < brightest_voxel)
-	//{
-	//	dist_b = clamp(abs((brightest_voxel - volume) - buffer_index), 0.0f, volume * 0.1f);
-	//}
-	//else
-	//{
-	//	dist_b = clamp(abs((brightest_voxel + volume) - buffer_index), 0.0f, volume * 0.1f);
-	//}
-
-	//color += ((dist_a + dist_b) / volume) * 0.03f;
 
 	color_buffer.colors[buffer_index] = color;
 }

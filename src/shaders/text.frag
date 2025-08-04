@@ -14,5 +14,5 @@ void main()
 	// uncomment for visible background
 	// alpha = length(color.xyz) / 2.0f + 0.5f;
 
-	FragColor = vec4(vec3(f_color), alpha);
+	FragColor = vec4(vec3(0.25f), alpha * f_color);
 }

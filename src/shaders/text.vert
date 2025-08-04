@@ -7,6 +7,7 @@ struct Char
 	float x;
 	float y;
 	float size;
+	float color;
 };
 
 // Includes all text written to the screen this frame.
@@ -35,7 +36,7 @@ void main()
 		ch.y
 	) * ch.size * 2.0f;
 	gl_Position = vec4((ubo.transform * ((in_position * ch.size) + text_pos)) + offset, -1.0f, 1.0f);
-	f_color = 0.25f;
+	f_color = mix(ch.color, 1.0f, 0.0f);
 
 	int i = ch.index;
 	float x = mod(i, 16.0f);

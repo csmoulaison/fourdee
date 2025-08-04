@@ -30,6 +30,7 @@ typedef struct
 	float x;
 	float y;
 	float size;
+	float color;
 } TextChar;
 
 #include "fill_text.c"
@@ -42,9 +43,15 @@ typedef struct
 
 typedef struct
 {
+	float data[MAX_DIMENSIONS];
+	float time;
+} ModeUbo;
+
+typedef struct
+{
 	// this is a mat2, but must be separated like this for padding requirements.
-	alignas(16) Vec2f transform_a;
-	alignas(16) Vec2f transform_b;
+	alignas(16) float transform_a[2];
+	alignas(16) float transform_b[2];
 } TextUbo;
 
 typedef struct
@@ -75,7 +82,7 @@ typedef struct
 	uint32_t text_program;
 
 	// Compute programs
-	uint32_t mode_programs[MAX_DIMENSIONS];
+	uint32_t mode_programs[MODES_COUNT];
 } GlContext;
 
 uint32_t gl_compile_shader(char* filename, GLenum type)
@@ -158,8 +165,8 @@ void gl_init(GlContext* gl, Game* game)
 	glDeleteShader(text_vert_shader);
 	glDeleteShader(text_frag_shader);
 
-	// Mode programs
-	for(uint8_t i = 0; i < 3; i++) // TODO - change to MODES_COUNT
+	// Mode program
+	for(uint8_t i = 0; i < MODES_TMP_COUNT; i++) // TODO - should just be 256 once all levels exist.
 	{
 		Mode* mode = &game->modes[i];
 
@@ -168,7 +175,6 @@ void gl_init(GlContext* gl, Game* game)
 		glAttachShader(gl->mode_programs[i], mode_shader);
 		glLinkProgram(gl->mode_programs[i]);
 		glDeleteShader(mode_shader);
-		printf("moder\n");
 	}
 
 	// Vertex arrays/buffers
@@ -303,7 +309,7 @@ void gl_init(GlContext* gl, Game* game)
 
 	glGenBuffers(1, &gl->mode_data_ubo_buffer);
 	glBindBuffer(GL_UNIFORM_BUFFER, gl->mode_data_ubo_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(float[MAX_DIMENSIONS]), NULL, GL_DYNAMIC_DRAW);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(ModeUbo), NULL, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -322,9 +328,13 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	uint32_t grid_volume = grid_length * grid_area;
 
 	// Update buffer
+	ModeUbo mode_ubo;
+	mode_ubo.time = game->time_since_init;
+	memcpy(mode_ubo.data, game->mode_data, sizeof(game->mode_data));
+	
 	glBindBuffer(GL_UNIFORM_BUFFER, gl->mode_data_ubo_buffer);
 	void* p_mode_data_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
-	memcpy(p_mode_data_ubo, &game->mode_data, sizeof(float[MAX_DIMENSIONS]));
+	memcpy(p_mode_data_ubo, &mode_ubo, sizeof(ModeUbo));
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	// Dispatch compute program
@@ -345,8 +355,8 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 
 	mat4 view;
 	glm_mat4_identity(view);
-	Vec3f cam_target = {0, 0, 0};
-	Vec3f up = {0, 1, 0};
+	float cam_target[3] = {0, 0, 0};
+	float up[3] = {0, 1, 0};
 	glm_lookat((float*)&game->cam_position, (float*)&cam_target, (float*)&up, view);
 
 	glm_mat4_mul(perspective, view, voxel_ubo.projection);
@@ -358,7 +368,8 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 
 	// Update instance to voxel map ssbo
 	int32_t instance_to_voxel_map[grid_volume];
-	Vec3f cam_pos = game->cam_position;
+	float cam_pos[3];
+	v3_copy(game->cam_position, cam_pos);
 
 	sort_voxels(instance_to_voxel_map, grid_length, grid_area, grid_volume, cam_pos);
 
@@ -380,8 +391,8 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	float text_scale_x = 27.0f / window_width;
 	float text_scale_y = 46.0f / window_height;
 	
-	text_ubo.transform_a = (Vec2f) {  text_scale_x,  0 };
-	text_ubo.transform_b = (Vec2f) {  0, -text_scale_y };
+	v2_init(text_ubo.transform_a, text_scale_x,  0);
+	v2_init(text_ubo.transform_b, 0, -text_scale_y);
 
 	glBindBuffer(GL_UNIFORM_BUFFER, gl->text_ubo_buffer);
 	void* p_text_ubo = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
@@ -400,35 +411,27 @@ void gl_loop(GlContext* gl, Game* game, float window_width, float window_height)
 	//
 	// As a part of that, we will want to make the flow between levels and
 	// implement the level selector.
+	Mode* current_mode = &game->modes[game->current_mode];
 	TextChar text_buffer[TEXT_MAX_CHARS];
 
-	char* desc_str = "Fun with sine waves.";
-	uint32_t text_i = fill_text_buffer(desc_str, text_buffer, (Vec2f){2.35, 28.25}, 1.0f);
+	char desc_str[128];
+	float text_pos[2];
+
+	sprintf(desc_str, "%s", current_mode->compute_filename);
+	uint32_t text_i = fill_text_buffer(desc_str, text_buffer, v2_init(text_pos, 2.35f, 28.25f), 1.0f, 1.0f);
 
 	char* sub_desc_str = "This is just a small showcase of what our world, nay, our universe, is capable of.";
-	text_i += fill_text_buffer(sub_desc_str, &text_buffer[text_i], (Vec2f){4, 59}, 0.5f);
+	text_i += fill_text_buffer(sub_desc_str, &text_buffer[text_i], v2_init(text_pos, 4, 59), 0.5f, 1.0f);
+
+	char* space_prompt_str = "[Space]";
+	text_i += fill_text_buffer(space_prompt_str, &text_buffer[text_i], v2_init(text_pos, 49.8f, 36.0f), 0.66f, 1.0f - sin(game->time_since_init * 1.0f));
 
 #define DIMLEN 7
-	struct 
-	{
-		char control_down;
-		char control_up;
-	} dimensions[DIMLEN] = {
-		{ 'A', 'D' },
-		{ 'Q', 'E' },
-		{ 'W', 'S' },
-		{ 'R', 'F' },
-		{ 'T', 'G' },
-		{ 'Y', 'H' },
-		{ 'U', 'J' }
-	};
-
-	for(uint8_t i = 0; i < DIMLEN ; i++)
+	for(uint8_t i = 0; i < current_mode->visible_dimensions; i++)
 	{
 		char s[128];
-		//sprintf(s, "[%c,%c] %.1f", dimensions[i].control_down, dimensions[i].control_up, game->mode_data[i]);
 		sprintf(s, "[%i] %.1f", i, game->mode_data[i]);
-		text_i += fill_text_buffer(s, &text_buffer[text_i], (Vec2f){4, 2.5 + i * 1.5}, 0.66f);
+		text_i += fill_text_buffer(s, &text_buffer[text_i], v2_init(text_pos, 4, 2.5 + i * 1.5), 0.66f, 1.0f);
 	}
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl->text_buffer);

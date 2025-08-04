@@ -22,9 +22,9 @@ struct Sphere
 
 layout(std140, binding = 1) uniform in_ubo
 {
-	Sphere sphere;
-	vec3 camera_position;
 	float time;
+	vec3 camera_position;
+	Sphere sphere;
 } ubo;
 
 struct Hit
